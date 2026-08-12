@@ -1,16 +1,14 @@
 # submarine_freerider_watermarking_federatedlearning_summer-epfl
 
-TODO: cleanup and redo the readme
-# FareMark — reproduction + limitations study
+Summer@EPFL 2026 - SaCS lab project
+
+Project: Reproduction and limitations study of **FareMark: Model-Watermark-Driven Free-Rider Detection in Federated Learning** (Li et al., IEEE IoT-J 12(18), 2025) + Submarine free-rider attack design and experiments to prove that output layer watermarking in federated learning for free-rider detection is impossible in general.
+Goal: Show experimentally that under the paper's own setup and under extensions (non-IID, adaptive free-riders, more clients than classes), no threshold separates honest clients from free-riders - ie. output layer watermarking in federated learning for free-rider detection is impossible in general through a newly design adaptive free-rider attack (submarine attack) that exploits the paper's own limitations.
+
+## FareMark — reproduction + limitations study
 
 Re-implementation and limitations analysis of **FareMark: Model-Watermark-Driven Free-Rider Detection in Federated Learning** (Li et al., IEEE IoT-J 12(18), 2025).
 Centralized FedAvg simulated on one GPU, with a per-client output-layer watermark loss, a memory-enhanced update (Eq. 14), and server-side verification (Eq. 15–16).
-
----
-
-## Goal
-
-Show experimentally that under the paper's own setup and under extensions (non-IID, adaptive free-riders, more clients than classes), no threshold separates honest clients from free-riders - ie. output layer watermarking in federated learning for free-rider detection is impossible in general
 
 ---
 
@@ -83,34 +81,6 @@ RES=~/local/results ./plot_now.sh
 
 ---
 ---
----
-
-# STORYLINE
-
-## Plan
-
-### 1. Reproduce the FareMark method — done
-Eq. 1–16 implemented in `watermark.py`, embedding in `clients.py`, verification in `wm_verify.py`. Each implementation step was checked against the paper and tested against the paper's results.
-
-### 2. Reproding FareMark results — in progress
-Tested baselines against the paper's result tables. missing final tables for abaltions and extra studies
-
-### 3. Limitations — done
-Figure out paper's weak points, what to exploit: threshold (non-seperability), class difficulty, non-iid, oversubscription, adapted free-riders
-
-### 4. Prove limitations + build an attack - in progress
-Thresholds limitation shown through reduced attacker. Building submarine attacker
-
-### 5. Stress test — todo
-Stress tests each setting for the above limitations
-
-### 6. Argue output-layer watermarking is impossible — todo
-...
-
-### 7. Hint at a solution — todo
-...
-
-
 ---
 
 # CODEMAP - TODO complete the codemap once all code is done, wired and tested

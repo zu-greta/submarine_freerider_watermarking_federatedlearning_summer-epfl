@@ -350,10 +350,6 @@ RES=../results/groups ./runbook.sh plot
 
 **Recommended experiments:**
 ```
-# hard-class data test (does full-data taps reach the honest twin? at what compute cost):
-K4B=1 BATCH=K ./runbook.sh manifest && K4B=1 BATCH=K ./runbook.sh submit
-K4B=1 RES=../results/groups ./runbook.sh plot
-
 # exclude-trigger ablation (does honest trig_acc rise / BER drop? proves the 6c mechanism):
 BATCH=X ./runbook.sh manifest && BATCH=X ./runbook.sh submit
 python plot_honest_per_round.py --in '<RES>/X1_honest_excltrig_c100_rep*/result.json' \

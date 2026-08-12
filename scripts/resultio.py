@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """resultio -- results.json
 -------------------------------------------------------
-    schema_version                          int, 2 = post-cleanup runs
+    schema_version                          int, 2 
     manifest.family                         grouping key for plots/calibration
     manifest.{sweep_var, sweep_level}       sweep axis, if any
     seed, config{...}                       full ExpConfig snapshot
     free_rider_indices                      [cid, ...]
-    summary{...}                            flat digest (NEW, v2; see _summary())
+    summary{...}                            flat digest (v2; see _summary())
     per_class.by_class[c]  = {acc, loss, n} final-model per-class test metrics
     history[r] = {
         round, test_acc,
@@ -44,8 +44,8 @@ DEFAULT_TAIL = 20
 def load(globs, with_path=True):
     """Load every result.json matching `globs`.
 
-    with_path=True  -> [(path, run), ...]   (what threshold.py expects)
-    with_path=False -> [run, ...]           (what separability.py expects)
+    with_path=True  -> [(path, run), ...]   
+    with_path=False -> [run, ...]          
     Unreadable files are skipped with a note rather than killing the run.
     """
     out = []

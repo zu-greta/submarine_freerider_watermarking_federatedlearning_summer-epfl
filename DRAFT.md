@@ -132,6 +132,8 @@ TODO: read papers and fill in the table for reference
 ## 10. Conclusion
 
 - restate results and thesis
+- clarify that current results are only empirical on one model and dataset - resnet-18 and cifar-100. but the results are generalizable to other models and datasets as well.
+- future works: exploring solutions? reputation? building different attacks like collusion ?
 
 ---
 ---
@@ -142,12 +144,16 @@ TODO: read papers and fill in the table for reference
 ResNet-18 on CIFAR-100
 
 all experiments to run for the paper:
-- all honest no watermark run - establish basis
+- [done] all honest no watermark run - establish basis
 - honest client only runs - to establish honest BER, class difficulty and thresholds (run at multiple seeds with varying trigger class assignments -> so far only 0-9 done)
-- baseline free-rider runs - for comparison with faremark paper results - match paper settings
-- static reduced free-rider spectrum +N to show cheap free-rider
+   - [done] group A: honest clients watermarking, no FR, 6-10 seeds, 50 rounds, 10 clients, 1 trigger class per client, 50 held-out trigger-class images for verification. 
+   - [TODO] TODO: test differnt trigger classes ? only 0-9 done so far
+- [redo] baseline free-rider runs - for comparison with faremark paper results - match paper settings
+- [done] static reduced free-rider spectrum +N to show cheap free-rider
 - submarine free-rider runs -> oracle and self + full and block2 + reduced data amount variations -> settle on a single best config but show some different variations to show the effect of each parameter
+   - [TODO] J4 doesnt seem to give what i want? K4 seems to be the closest and K5 is not great. go with K4 for now but try a few variations to show the effects and diff FR variations maybe
 - non-iid with random and fair trigger class assignment for honest only and FR runs
+   - [TODO] better comparison plots and EA2 does not render right now so rerun and fix
 
 plots to have for the paper:
 - honest BER from multiple seeds - show the differnet class difficulties and threshold basis
@@ -163,3 +169,12 @@ extra experiments for sanity checking
 - trigger class accuracy - on no watermark training to check if accruacy 0 is product of watermarking
 
 ---
+
+
+meeting notes:
+
+- dont sell the threshold -> just assume there is one, we want to find a generalized algorithm for output layer watermarking - inspired from faremark and all other output layer watermarking papers. eventually show that the submarine attack works for all of them. assume there is some sort of threshold (set it to an oracle - in the best case for the server and honest clients) and show that the submarine attack can evade it.
+- check the faremark paper and see how they classify the watermark accuracy - and how they detect free-riders (is it some sort of misclassification everytime the threshold is passed?)
+- main priority is the reference algorithm to build from all generic output layer watermarking papers and then show that the submarine attack can evade it. we are attacking the approach of output layer watermarking for free-rider detection in general, not just faremark. we are not attacking each paper individually, but rather the approach of output layer watermarking for free-rider detection in general. we will show that the submarine attack can evade it.
+- no solution proposal - pure attack paper
+- generalise and collect papers to be used later - papers doing output layer watermarking

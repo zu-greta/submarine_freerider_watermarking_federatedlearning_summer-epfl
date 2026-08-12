@@ -1,24 +1,28 @@
 #!/usr/bin/env python
-"""plots.py -- ALL FareMark figures in one place.
+"""plots.py -- all figures for the output-layer-watermarking free-rider study.
+
+(FareMark is one instance of the detector family we attack; keep names generic.)
 
 Subcommands (one per figure family):
 
-  honest_lines     honest BER per trigger class over rounds        -> A1/E1_class_floors
-  honest_per_round honest BER + trigger-class ACCURACY per round    -> A1/E1/EA1_honest_per_round
-                   (also the no-watermark control: trig_acc stays HIGH when lambda=0)
+  honest_lines     honest BER per trigger class over rounds         -> A1/E1/T1/T2_class_floors
+                   (--classes restricts/relabels the classes shown; used for the
+                    trigger-class generality figures on CIFAR-100 decades 40-49, 90-99)
+  honest_per_round honest BER + trigger-class accuracy per round    -> A1/E1/EA1_honest_per_round
+                   + no watermark control
   class_acc        per-client trigger vs non-trigger vs global acc  -> A0_class_acc
   sweep            +N data-budget spectrum (reduced FR)             -> D1_spectrum
   timeline         BER vs round, taps/coasts, eta lines             -> A2/A3/E2/E3 timelines
-  accuracy         global test acc, attack vs honest               -> accuracy_K4/K5
+  accuracy         global test acc, attack vs honest                -> accuracy_K4/K5
   dirichlet_dist   reference heatmap of the Dirichlet partition     -> dirichlet_dist
   gpu_savings      cumulative compute, FR vs honest                 -> gpu_savings_*
   iso_pair         isolated same-class BER, honest vs FR            -> iso_*  (cross-run)
-  iso_acc          isolated same-class ACCURACY, honest vs FR       -> iso_acc_*
+  iso_acc          isolated same-class accuracy, honest vs FR       -> iso_acc_*
 
-  --- submarine (K/J) tap-coast, three views of the SAME data ---
+  --- submarine (K/J) tap-coast, three views ---
   tap_perfr        seed-band single graph (mean over seeds)         -> tap_perfr_* / tap_J4_*
-  tap_perseed      one panel PER SEED (no marker collisions)        -> *_perseed
-  tap_effort       BER + cumulative SAMPLES side by side (effort)   -> *_effort
+  tap_perseed      one panel per seed (no marker collisions)        -> *_perseed
+  tap_effort       BER + cumulative samples side by side (effort)   -> *_effort
 
 Usage:
   python plots.py honest_lines --in 'results/*/result.json' --family A1_honest_c100 --out figs/A1_class_floors
@@ -86,22 +90,22 @@ LBL_FR_SERVER   = "FR server-measured BER"
 LBL_FR_PROBE    = "FR self-probe (drives tap/coast)"
 
 # titles # TEXT 
-TITLE_HONEST_LINES = "Honest BER per trigger class"                       # TEXT
-TITLE_PER_ROUND    = "Honest BER & trigger-class accuracy per round"      # TEXT
-TITLE_CLASS_ACC    = "Per-client trigger-class accuracy (all-honest)"     # TEXT
-TITLE_SWEEP1       = "Free-rider BER over rounds, per data budget"        # TEXT
-TITLE_SWEEP2       = "Converged free-rider BER vs data budget"            # TEXT
-TITLE_TIMELINE     = "BER vs round"                                       # TEXT
-TITLE_ACCURACY     = "Global test accuracy: attack vs honest"  # TEXT
-TITLE_DIRICHLET    = "Dirichlet(α) label-skew partition (rows=clients, cols=classes)"            # TEXT
-TITLE_GPU          = "Cumulative compute per round"                       # TEXT
-TITLE_ISO          = "Isolated same-class comparison"                     # TEXT
-TITLE_TAP          = "Submarine tap / coast"                              # TEXT
+TITLE_HONEST_LINES = "Honest BER per trigger class"                       
+TITLE_PER_ROUND    = "Honest BER & trigger-class accuracy per round"     
+TITLE_CLASS_ACC    = "Per-client trigger-class accuracy (all-honest)"     
+TITLE_SWEEP1       = "Free-rider BER over rounds, per data budget"       
+TITLE_SWEEP2       = "Converged free-rider BER vs data budget"          
+TITLE_TIMELINE     = "BER vs round"                                      
+TITLE_ACCURACY     = "Global test accuracy: attack vs honest"  
+TITLE_DIRICHLET    = "Dirichlet(α) label-skew partition (rows=clients, cols=classes)"       
+TITLE_GPU          = "Cumulative compute per round"                    
+TITLE_ISO          = "Isolated same-class comparison"                 
+TITLE_TAP          = "Submarine tap / coast"                       
 
 
-# ###########################################################################
-# ##  STYLE  (Okabe-Ito colour-blind-safe palette; no dual y-axes).        ##
-# ###########################################################################
+# ####################################################
+# ##  STYLE  (Okabe-Ito colour-blind-safe palette)  ##
+# ####################################################
 OKABE = {"blue": "#0072B2", "orange": "#E69F00", "green": "#009E73",
          "red": "#D55E00", "purple": "#CC79A7", "sky": "#56B4E9",
          "yellow": "#F0E442", "black": "#000000", "grey": "#7F7F7F"}
@@ -290,7 +294,7 @@ def eta_pair(a, runs=None):
 # ##  GROUP A -- honest baselines                                          ##
 # ###########################################################################
 def honest_lines(a):
-    """Honest client BER over rounds, ONE line per trigger class. The right end of
+    """Honest client BER over rounds, one line per trigger class. Tail of 
     each line == that class's converged floor.  -> A1/E1_class_floors."""
     tail = a.tail or TAIL
     runs = honest_runs(load(a.inp), a.family)
@@ -353,17 +357,8 @@ def honest_lines(a):
 
 
 def honest_per_round(a):
-    """Per-ROUND honest BER (top) and trigger-class ACCURACY (bottom), one line per
-    trigger class, aggregated over seeds. Reads wm_per_client[*].trig_acc.
-
-    Reading it 
-      * BER descends to each class floor  -> the mark embeds.
-      * trig_acc stays ~0 on the SAME rounds -> the watermark loss suppresses the
-        trigger class below argmax to embed (EXPECTED; measured on each client's
-        submitted watermarked model).
-      * trig_acc ~0 with BER ~0.5 (not ~0) -> data STARVATION (non-IID empty shard).
-      * For the NO-WATERMARK control (lambda=0), trig_acc stays HIGH -> proves the
-        ~0 accuracy in A1 is caused by the watermark embedding, not the class.
+    """Per-round honest BER (top) and trigger-class accruacy (bottom), one line per
+    trigger class, aggregated over seeds. 
     -> A1/E1/EA1_honest_per_round  (and A0_nowm_per_round).
     """
     runs = load(a.inp)
@@ -432,7 +427,7 @@ def honest_per_round(a):
     axA.legend(fontsize=7.5, ncol=2, loc="upper right", framealpha=.9)
     finish(fig, a.out or "honest_per_round")
 
-    # suppression-vs-starvation split (printed; explains the zeros)
+    # suppression-vs-starvation split (printed)
     n_cr = n_pos = supp = starv = mid = 0
     max_round = max(rounds) if rounds else 0
     lo = max(1, max_round - a.tail + 1)
@@ -464,9 +459,9 @@ def honest_per_round(a):
 
 
 def class_acc(a):
-    """PER-CLIENT trigger-class accuracy check (all-honest run). One panel per client:
+    """per client trigger-class accuracy check (all-honest run). One panel per client:
     trigger-class vs mean-non-trigger vs global test accuracy of the shared global
-    model. Isolates trigger-class DIFFICULTY from the watermark.  -> A0_class_acc."""
+    model. Isolates trigger-class difficulty from the watermark.  -> A0_class_acc."""
     runs = pick(load(a.inp), a.family)
     if not runs:
         print("no runs for", a.family); return
@@ -616,9 +611,23 @@ def sweep(a):
 # ###########################################################################
 # ##  GROUP A/D/E -- BER-vs-round timeline (reduced free-riders)           ##
 # ###########################################################################
+def _majority_marks(tap_ct, coa_ct, rounds):
+    """For each round, pick the SINGLE action most seeds/clients agree on, so the two
+    marker types never overlap and EVERY attacker round gets exactly one symbol
+    (reference only). tap_ct/coa_ct are {round: count}; ties -> 'tap' (assume it
+    trained). Returns two disjoint, sorted lists (tap_rounds, coast_rounds)."""
+    taps, coasts = [], []
+    for rd in sorted(rounds):
+        t, c = tap_ct.get(rd, 0), coa_ct.get(rd, 0)
+        if t == 0 and c == 0:
+            continue
+        (taps if t >= c else coasts).append(rd)
+    return taps, coasts
+
+
 def timeline(a):
-    """BER over rounds: honest mean band, free-rider mean band, taps/coasts, the
-    frozen eta lines, and (via --honest_in) the honest floor at the FR's own classes.
+    """BER over rounds: honest mean band, free-rider mean band, taps/coasts, 
+    frozen eta lines, and (--honest_in) honest floor at the FR's own classes.
     -> A2/A3_timeline, E2/E3_timeline."""
     runs = [r for r in load(a.inp) if (a.family is None or fam(r) == a.family)
             and (a.seed is None or r.get("seed") == int(a.seed))]
@@ -681,10 +690,9 @@ def timeline(a):
             n = min(len(tr), len(rounds))
             ax.plot(rounds[:n], tr[:n], color=C_HONEST, lw=0.9, alpha=.5, ls=(0, (4, 2)), zorder=3,
                     label=("honest client(s) at FR's class" if not doneh else None)); doneh = True
-        tapx = [rd for rd, c in taps.items() if c > nseed / 2]
+        tapx, coax = _majority_marks(taps, coasts, rounds)
         ax.scatter(tapx, [f_mean[rounds.index(rd)] for rd in tapx], marker="v", s=34,
                    color=C_FR, edgecolor="white", zorder=5, label=f"{LBL_TAP} [majority]")
-        coax = [rd for rd, c in coasts.items() if c > nseed / 2]
         ax.scatter(coax, [f_mean[rounds.index(rd)] for rd in coax], marker="s", s=30,
                    color="white", edgecolor=C_FR, zorder=5, label=f"{LBL_COAST} [majority]")
     else:
@@ -699,10 +707,9 @@ def timeline(a):
                     label=f"free-rider cid {cid}")
         ax.plot(rounds, h_mean, color=C_HONEST, lw=2.8, label=LBL_HONEST_MEAN)
         ax.plot(rounds, f_mean, color=C_FR, lw=2.8, label=LBL_FR_MEAN)
-        tapx = [rd for rd in rounds if rd in taps]
+        tapx, coax = _majority_marks(taps, coasts, rounds)
         ax.scatter(tapx, [f_mean[rounds.index(rd)] for rd in tapx], marker="v", s=34,
                    color=C_FR, edgecolor="white", zorder=5, label=LBL_TAP)
-        coax = [rd for rd in rounds if rd in coasts]
         ax.scatter(coax, [f_mean[rounds.index(rd)] for rd in coax], marker="s", s=30,
                    color="white", edgecolor=C_FR, zorder=5, label=LBL_COAST)
 
@@ -744,7 +751,7 @@ def timeline(a):
 # ###########################################################################
 def accuracy(a):
     """Global test accuracy over rounds: attack vs honest reference, + the FR's own
-    trigger-class TEST accuracy from per_class of the final model.  -> accuracy_K4/K5."""
+    trigger-class test accuracy from per_class of the final model.  -> accuracy_K4/K5."""
     fams = a.families or ([a.family] if a.family else None)
     if not fams:
         raise SystemExit("pass --family <fam> or --families f1 f2 ...")
@@ -785,8 +792,8 @@ def accuracy(a):
 # ##  GROUP E/EA -- reference Dirichlet partition heatmaps                 ##
 # ###########################################################################
 def dirichlet_dist(a):
-    """Reference heatmaps of a Dirichlet(alpha) label-skew partition (no result files
-    needed). rows=clients, cols=classes, colour=share of a class a client holds.
+    """Reference heatmaps of a Dirichlet(alpha) label-skew partition 
+    rows=clients, cols=classes, colour=share of a class a client holds. 
     -> dirichlet_dist."""
     n_classes = int(a.classes) if getattr(a, "classes", None) else 10
     n_clients = 10
@@ -885,7 +892,7 @@ def gpu_savings(a):
 
 
 # ###########################################################################
-# ##  ISOLATED cross-run same-class comparisons                            ##
+# ##  isolated cross-run same-class comparisons                            ##
 # ###########################################################################
 def _iso_series(run):
     """rounds, eta, {cid: {tc, fr, ber:{r:ber}}} for one run."""
@@ -927,10 +934,9 @@ def _iso_collect(runs, tclass):
 
 
 def iso_pair(a):
-    """Isolated same-class BER: the honest client on class X (from --honest_in, an
-    all-honest run) vs the free-rider on class X (from --fr_in, an attack run where
-    it is the only client on X). They never share the class inside one model -> no
-    watermark conflict.  -> iso_*."""
+    """Isolated same-class BER: the honest client on class X (--honest_in) 
+    vs the free-rider on class X (--fr_in).
+    -> iso_*."""
     if not (a.honest_in and a.fr_in):
         raise SystemExit("iso_pair needs --honest_in and --fr_in")
     hruns = load(a.honest_in)
@@ -980,8 +986,9 @@ def iso_pair(a):
 
 
 def iso_acc(a):
-    """Isolated same-class ACCURACY companion to iso_pair. Left: trigger-sample
-    accuracy over rounds, honest vs FR. Right: global test accuracy per run.
+    """Isolated same-class accuracy companion to iso_pair. 
+    Left: trigger-sample accuracy over rounds, honest vs FR. 
+    Right: global test accuracy per run.
     -> iso_acc_*."""
     if not (a.honest_in and a.fr_in) or a.cls is None:
         raise SystemExit("iso_acc needs --honest_in, --fr_in and --class")
@@ -1030,7 +1037,7 @@ def iso_acc(a):
 
 
 # ###########################################################################
-# ##  GROUP K / J -- SUBMARINE tap/coast (three views of the same data)    ##
+# ##  GROUP K / J -- SUBMARINE tap/coast                                   ##
 # ###########################################################################
 def _submarine(runs, honest_ext=None, honest_family=None):
     """Extract, per free-rider cid:
@@ -1102,7 +1109,7 @@ def _tap_fraction(seeds):
 
 
 def tap_perfr(a):
-    """VIEW 1 (seed-band): ONE figure per free-rider, mean over seeds with a std band.
+    """VIEW 1 (seed-band): one figure per free-rider, mean over seeds with a std band.
     tap/coast markers are drawn where the MAJORITY of seeds tapped/coasted.
     -> tap_perfr_* / tap_J4_*."""
     fams = a.families or ([a.family] if a.family else None)
@@ -1146,8 +1153,7 @@ def tap_perfr(a):
             for s in seeds:
                 for rd, ac in s["act"].items():
                     (tap_ct if ac == "tap" else coa_ct)[rd] += 1
-            tapx = [rd for rd in srv_at if tap_ct.get(rd, 0) > nseed / 2]
-            coax = [rd for rd in srv_at if coa_ct.get(rd, 0) > nseed / 2]
+            tapx, coax = _majority_marks(tap_ct, coa_ct, srv_at)
             ax.scatter(tapx, [srv_at[rd] for rd in tapx], marker="v", s=72, color=OKABE["blue"],
                        edgecolor="white", zorder=6, label=f"{LBL_TAP} [majority]")
             ax.scatter(coax, [srv_at[rd] for rd in coax], marker="s", s=44, facecolor="white",
@@ -1175,7 +1181,7 @@ def tap_perfr(a):
 
 
 def tap_perseed(a):
-    """VIEW 2 (per-seed panels): ONE figure per free-rider, with ONE PANEL PER SEED so
+    """VIEW 2 (per-seed panels): one figure per free-rider, with one panel per seed so
     the tap/coast markers of different seeds never collide.  -> *_cid<cid>_perseed."""
     fams = a.families or ([a.family] if a.family else None)
     if not fams:
@@ -1233,9 +1239,9 @@ def tap_perseed(a):
 
 
 def tap_effort(a):
-    """VIEW 3 (BER + effort side by side): ONE figure per free-rider, two panels:
+    """VIEW 3 (BER + effort side by side): one figure per free-rider, two panels:
     left = server BER over rounds (mean±band) with the eta lines + honest twin;
-    right = cumulative SAMPLES, free-rider vs honest mean (effort in one look).
+    right = cumulative samples, free-rider vs honest mean (effort).
     -> *_cid<cid>_effort."""
     fams = a.families or ([a.family] if a.family else None)
     if not fams:
@@ -1281,6 +1287,16 @@ def tap_effort(a):
             if nseed > 1:
                 axL.fill_between(sx, np.array(smean) - np.array(sstd), np.array(smean) + np.array(sstd),
                                  color=C_FR, alpha=.15)
+            srv_at = dict(zip(sx, smean))
+            tap_ct, coa_ct = defaultdict(int), defaultdict(int)
+            for s in seeds:
+                for rd, ac in s["act"].items():
+                    (tap_ct if ac == "tap" else coa_ct)[rd] += 1
+            tapx, coax = _majority_marks(tap_ct, coa_ct, srv_at)
+            axL.scatter(tapx, [srv_at[rd] for rd in tapx], marker="v", s=56, color=OKABE["blue"],
+                        edgecolor="white", zorder=6, label=f"{LBL_TAP} [majority]")
+            axL.scatter(coax, [srv_at[rd] for rd in coax], marker="s", s=36, facecolor="white",
+                        edgecolor=C_FR, zorder=6, label=f"{LBL_COAST} [majority]")
             axL.axhline(eta_l, color=C_HONEST, ls="--", lw=1.6, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
             axL.axhline(eta_t, color="black", ls=":", lw=1.2, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
             axL.set_xlabel(LBL_ROUND); axL.set_ylabel(LBL_BER_SHORT)

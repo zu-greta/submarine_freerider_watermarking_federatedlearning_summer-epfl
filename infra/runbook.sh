@@ -10,7 +10,7 @@
 #   ./runbook.sh plot          4. ALL figures (plots.py, organised by group)
 #   ./runbook.sh grade         5. paper_check tables (optional, paper-repro rows)
 #
-# Knobs (env): BATCH, PODS, WORKERS, RES, OUT, FAST_DATA(1), DETERMINISM(0), K4B(1)
+# Knobs (env): BATCH, PODS, WORKERS, RES, OUT, FAST_DATA(1), DETERMINISM(0)
 #
 #   BATCH=<> ./runbook.sh manifest 
 #   WORKERS=<> PODS=<> BATCH=<> ./runbook.sh submit      
@@ -20,12 +20,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
 
 # ---- batch selection --------------------------------------------------------
-# Default = the two new groups:
-#   Z = no-watermark control (lambda=0; proves trig_acc~0 is caused by the watermark)
-#   Y = J4 oracle-eta reproduction at classes 3,6 AND 1,7
-# Other groups (already run / regenerable): A D E EA H K.  Combine letters, e.g.
-#   BATCH=EEAK ./runbook.sh manifest   # E + EA + K together
-BATCH="${BATCH:-ZY}"
+# Default = A
+BATCH="${BATCH:-A}"   # WHOLE tokens, space/comma separated: "H T EA" 
 PAPER_OK="${PAPER_OK:-0}"          # 1 = also build probe-gated paper rows (grade phase)
 FAST_DATA="${FAST_DATA:-1}"        # 1 = GPU-resident loaders (kills DataLoader fork storms)
 DETERMINISM="${DETERMINISM:-0}"    # 0 = cuDNN autotuner on (~1.3-2x; stat. identical over seeds)
@@ -98,6 +94,18 @@ phase_plot(){
   run "$PL iso_acc --honest_in '$ALL' --fr_in '$ALL' --family K4_alldyn_block2_c36 --class 6 --out $OUT/iso_acc_c6"
   run "$PL iso_acc --honest_in '$ALL' --fr_in '$ALL' --family A2_reduced_c100_c17 --class 7 --out $OUT/iso_acc_c7"
 
+  # ===================== GROUP T -- honest-band generality (classes 40-49, 90-99) ==
+  # Same honest-floor view as A1 but on other CIFAR-100 decades
+  run "$PL honest_lines     --in '$ALL' --family T1_honest_c100_cls4049 --tail 20 --out $OUT/T1_class_floors"
+  run "$PL honest_lines     --in '$ALL' --family T2_honest_c100_cls9099 --tail 20 --out $OUT/T2_class_floors"
+  run "$PL honest_per_round --in '$ALL' --family T1_honest_c100_cls4049 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T1_honest_per_round"
+  run "$PL honest_per_round --in '$ALL' --family T2_honest_c100_cls9099 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T2_honest_per_round"
+
+  # ===================== GROUP H -- baseline free-riders (must be CAUGHT) ====
+  # Positive controls: base free-riders sit near BER 0.5 
+  run "$PL timeline --in '$ALL' --family H5_prevmodel_c100 --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/H5_prevmodel_timeline"
+  run "$PL timeline --in '$ALL' --family H6_gaussian_c100 --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/H6_gaussian_timeline"
+
   # ===================== GROUP D -- reduced data-budget spectrum ============
   run "$PL sweep       --in '$ALL' --family D1_reduced_c100_c36 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/D1_spectrum"
   run "$PL gpu_savings --in '$ALL' --family D1_reduced_c100_c36_n5 --out $OUT/gpu_savings_D1_reduced_c100_c36_n5"
@@ -123,12 +131,13 @@ phase_plot(){
   #   tap_perfr   = seed-band single graph (mean over seeds; majority tap/coast markers)
   #   tap_perseed = one panel PER SEED (fixes the marker collisions across seeds)
   #   tap_effort  = BER + cumulative SAMPLES side by side (stealth vs effort in one look)
-  for fam in K4_alldyn_block2_c36 K5_alldyn_full_c36 ${K4B:+K4b_alldyn_block2_fulldata_c36}; do
+  for fam in K4_alldyn_block2_c36 K5_alldyn_full_c36; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
-    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
-    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_effort_${fam}"
     run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --out $OUT/accuracy_${fam}"
     run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    run "$PL timeline --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
   done
   # isolated same-class twin (from A1) for cid3 (easy) and cid6 (hard), K4 + K5
   for cls in 3 6; do
@@ -141,9 +150,10 @@ phase_plot(){
   run "$PL honest_per_round --in '$ALL' --family A0_nowm_honest_c100 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/A0_nowm_per_round"
   run "$PL class_acc        --in '$ALL' --family A0_nowm_honest_c100 --out $OUT/A0_nowm_class_acc"
 
-  # ===================== GROUP Y -- J4 oracle-eta reproduction ==============
-  # J4 = the oracle-eta version of K4 (block2 + graft, given eta=0.264). 
+  # ===================== GROUP Y -- ORACLE-THRESHOLD ablation (J4) ==========
+  # J4 = the submarine handed the TRUE eta (0.264) instead of self-estimating it
   for fam in J4_scope_graft_block2_c36 J4_scope_graft_block2_c17; do
+    run "$PL timeline   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
     run "$PL tap_perfr  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
     run "$PL tap_effort --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
   done
@@ -181,7 +191,7 @@ runbook.sh -- run phases
     RES=~/local/results ./runbook.sh plot     4. ALL figures
     RES=~/local/results ./runbook.sh grade    5. paper tables (optional)
 
-  batch letters: A D E EA H K Y Z . Combine, e.g. BATCH=EEAK. Batch size stays 16.
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z .
 USAGE
     ;;
 esac
