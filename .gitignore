@@ -216,3 +216,26 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# ---
+
+**/.idea
+**/__pycache__/
+**/data/
+**/.DS_Store
+**/results/
+**/experiment_results/
+**/.vscode
+**/leaf/
+**.egg-info
+202**
+eval/data**
+**/massif.out*
+*swp
+build
+miniforge.sh
+.env
+logs/
+out/
+*jobs*.tsv

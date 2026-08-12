@@ -1,0 +1,60 @@
+"""Helper functions"""
+from __future__ import annotations  
+
+import logging
+import os
+import random
+import sys
+
+import numpy as np
+import torch
+
+
+def set_seed(seed: int, deterministic: bool = True) -> None:
+    """Seed every RNG - (config, repeat) pair is reproducible
+
+    deterministic=True  -> cuDNN forced deterministic, autotuner OFF (bit-reproducible
+                           runs; the paper-fidelity default).
+    deterministic=False -> cuDNN autotuner ON, deterministic OFF. ~1.3-2x faster on
+                           convs. Results are statistically identical 
+    Set via --no_determinism
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = bool(deterministic)
+    torch.backends.cudnn.benchmark = not bool(deterministic)
+
+
+def get_logger(name: str = "faremark", logfile: str | None = None) -> logging.Logger:
+    logger = logging.getLogger(name)
+    if logger.handlers:  # avoid duplicate handlers on re-entry
+        return logger
+    logger.setLevel(logging.INFO)
+    fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%H:%M:%S")
+
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+
+    if logfile:
+        os.makedirs(os.path.dirname(logfile), exist_ok=True)
+        fh = logging.FileHandler(logfile)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    return logger
+
+
+@torch.no_grad()
+def evaluate_accuracy(model, loader, device) -> float:
+    """Top-1 accuracy (%) over a data loader"""
+    model.eval()
+    correct, total = 0, 0
+    for x, y in loader:
+        x, y = x.to(device), y.to(device)
+        logits = model(x)
+        pred = logits.argmax(dim=1)
+        correct += (pred == y).sum().item()
+        total += y.size(0)
+    return 100.0 * correct / max(total, 1)
