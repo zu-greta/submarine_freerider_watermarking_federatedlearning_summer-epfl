@@ -100,6 +100,16 @@ phase_plot(){
   run "$PL honest_lines     --in '$ALL' --family T2_honest_c100_cls9099 --tail 20 --out $OUT/T2_class_floors"
   run "$PL honest_per_round --in '$ALL' --family T1_honest_c100_cls4049 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T1_honest_per_round"
   run "$PL honest_per_round --in '$ALL' --family T2_honest_c100_cls9099 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T2_honest_per_round"
+  # T3 -- all 100 classes at once (paper setting): floors + per-round view
+  run "$PL honest_lines     --in '$ALL' --family T3_honest_c100_allcls --tail 20 --out $OUT/T3_class_floors"
+  run "$PL honest_per_round --in '$ALL' --family T3_honest_c100_allcls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T3_honest_per_round"
+  # Pooled across A1 + T decades: the per-class difficulty BAND, and the
+  # paper-style single global watermark-accuracy number (mean over all honest clients).
+  ATFAMS="$HON T1_honest_c100_cls4049 T2_honest_c100_cls9099 T3_honest_c100_allcls"
+  run "$PL pooled_band --in '$ALL' --families $ATFAMS --tail 20 --out $OUT/pooled_band_AT"
+  run "$PL pooled_mean --in '$ALL' --families $ATFAMS --tail 20 --out $OUT/pooled_mean_AT"
+  # Cleanest apples-to-apples paper match: T3 alone (100 clients / 100 classes / N_T=100)
+  run "$PL pooled_mean --in '$ALL' --family T3_honest_c100_allcls --tail 20 --out $OUT/pooled_mean_T3"
 
   # ===================== GROUP H -- baseline free-riders (must be CAUGHT) ====
   # Positive controls: base free-riders sit near BER 0.5 

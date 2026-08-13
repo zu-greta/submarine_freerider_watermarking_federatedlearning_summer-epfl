@@ -72,6 +72,15 @@ if has T; then
         FAMILY="T2_honest_c100_cls9099" NOTE="T2 honest band, trigger classes 90-99" \
         ./submit_experiment.sh 14 "$s"
   done
+  # -------------------------------------------------------------------------
+  # T3 -- ALL 100 CIFAR-100 classes at once = paper Table II ResNet/CIFAR-100 (covering 0-99)
+  SEEDS_T3="${SEEDS_T3:-0 1 2 3 4 5}"
+  for s in $SEEDS_T3; do
+    env ATTACK=none NUM_FREE_RIDERS=0 NUM_CLIENTS=100 WM_NUM_TRIGGERS=100 ROUNDS=50 \
+        FAMILY="T3_honest_c100_allcls" \
+        NOTE="T3 honest, ALL 100 classes (100 clients, N_T=100) -- paper ResNet/CIFAR-100 setting" \
+        ./submit_experiment.sh 14 "$s"
+  done
 fi
 
 # ---------------------------------------------------------------------------
@@ -81,9 +90,9 @@ if has D; then
   echo "   (group D -- uncomment loop below to regenerate)"
   for N in -1 0 1 2 5 10; do
     for s in 0 1 2; do
-      env ATTACK=reduced FREE_RIDER_IDS=3,6 AUTOP_COMMON_PER_CLASS=$N \
+      env ATTACK=reduced FREE_RIDER_IDS=6,8 AUTOP_COMMON_PER_CLASS=$N \
           AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
-          FAMILY="D1_reduced_c100_c36_n${N}" NOTE="D1 +N spectrum N=$N" ./submit_experiment.sh 14 "$s"
+          FAMILY="D1_reduced_c100_c68_n${N}" NOTE="D1 +N spectrum N=$N" ./submit_experiment.sh 14 "$s"
     done
   done
 fi

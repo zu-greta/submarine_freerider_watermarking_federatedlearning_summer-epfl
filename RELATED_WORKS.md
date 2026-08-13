@@ -412,3 +412,244 @@ free-rider decision is a threshold on recovery.
 - **Theory template + scope boundary:** FedIPR Theorem 1 (capacity), FedTracker FSS motivation
   (hard-threshold fragility).
 - **Non-IID rebuttal:** FedIPR Table 12/14 and FedTracker Sec. VI-C, contrasted with your Group E.
+
+
+
+---
+# Output-Layer & FL Watermarking — Literature Map for the Generic Detector
+
+Purpose: (1) list the output-layer / FL watermarking papers relevant to attacking
+**output-layer watermarking for free-rider detection**; (2) deep-dive the ones you
+flagged; (3) point you at the exact sections to read to build the *generic reference
+detector* your paper attacks.
+
+> Sourcing caveat: FareMark is paywalled (IEEE IoT-J), so its equation-level details
+> below come from **your own re-implementation / `paper_check.py`**, cross-checked
+> against its public abstract, not from the PDF. FedIPR / DICTION / the survey details
+> are from their open arXiv/MDPI versions. Everything is paraphrased — verify exact
+> line/equation numbers in the PDFs before citing.
+
+---
+
+## 0. TL;DR — what actually matters for you
+
+Your attack target is a **narrow slice** of the watermarking literature:
+
+- **Box-free / output-behavior watermarking used *for free-rider detection*** — the mark
+  is read from the model's **outputs** (softmax on a trigger set), and a client is
+  flagged when its per-round detection error exceeds a threshold. Only **FareMark/FRAD**
+  are squarely in this slice; the **backdoor branch of FedIPR** and client-side
+  backdoor schemes (Yang et al.) share the same decision structure.
+- Everything **white-box / feature-based** (Uchida, RIGA, DeepSigns, DICTION, FedIPR's
+  feature branch) embeds in **weights or activations of interior layers** — you
+  explicitly exclude these for the *attack*, but **DICTION's unified framework** is the
+  right *formalism* to borrow for your theory/generalization section.
+- **Server-side** schemes (WAFFLE) are irrelevant as *detectors*: the server embeds, so
+  the free-rider's copied global model already carries the mark — it can't distinguish
+  free-riders. Useful only to explain *why FR detection must be client-side*.
+
+The single reduction your submarine exploits, shared by all output-layer FR detectors:
+**the mark is decoded from the output layer only**, so a free-rider needs to fool just
+that thin layer, not train the whole model.
+
+---
+
+## 1. Master list of papers
+
+### A. Output-layer watermarking for FREE-RIDER detection (your direct targets)
+| Paper | Venue / year | What it does | Read for |
+|---|---|---|---|
+| **FareMark** (Model-Watermark-Driven Free-Rider Detection) | IEEE IoT-J 2025 | Box-free; each client picks a **unique trigger class**, embeds a private multi-bit mark read from the **trigger-class softmax**; per-round BER vs threshold flags free-riders; "memory-enhancing local update" to fuse marks | **Your target.** Decision rule, threshold, trigger-class assignment, memory update |
+| **FRAD** (Free-Rider Attacks Detection ... AIoT) | ResearchGate/journal 2023 | **Near-identical abstract to FareMark** (same box-free scheme, unique trigger class, memory-enhancing local updating). Almost certainly the same line of work / earlier sibling by the same group | Cite as the same approach; check whether it's the conference precursor |
+
+### B. Client-side watermarking with a threshold decision (share your structure)
+| Paper | Venue / year | Watermark type | Read for |
+|---|---|---|---|
+| **FedIPR** (Li, Fan, Gu, Li, Yang) | TPAMI 2023 (arXiv 2109.13236) | **Both** feature-based (sign loss on normalization-layer scales) **and** backdoor-based (trigger set) | The backdoor branch = output-layer decision; your flagged "Algo 3 l.11 → output-layer only" |
+| **Yang et al.** — Client-Side Backdoor Triggered Watermarking | SMC 2021 / ACM TIST 2023 | Client-side backdoor (trigger misclassification) | Same trigger-set-error-vs-threshold decision, in FL |
+| **Harmless Backdoor-based Client-side Watermarking** | 2025 (arXiv 2410.21179) | Client-side backdoor, low harm | Recent instance of the same family |
+
+### C. White-box / feature-based (excluded from the attack; useful for theory)
+| Paper | Venue / year | Where the mark lives | Read for |
+|---|---|---|---|
+| **DICTION** (Bellafqira, Coatrieux) | arXiv 2210.15745, 2022 (+ Appl. Sci. 2025) | Activations (dynamic), GAN extractor, latent-space triggers | **Unified white-box framework** — your theory/generalization formalism |
+| **DeepSigns** (Rouhani et al.) | 2019 | Activation maps (dynamic) | The other dynamic scheme DICTION generalizes |
+| **Uchida et al.** | ICMR 2017 | Mean of conv filter weights (static) | Canonical static feature-based (you exclude) |
+| **RIGA** (Wang et al.) | 2021 | Weights, adversarially regularized (covert) | Covertness baseline (you exclude) |
+
+### D. Federated ownership (context; not FR detectors)
+| Paper | Venue / year | Note |
+|---|---|---|
+| **WAFFLE** (Tekgul et al.) | SRDS 2021 | **Server-side** backdoor at aggregation → can't detect free-riders |
+| **FedMark** | ICDCS 2024 | Large-capacity, Bloom filters; capacity-limit analysis |
+| **FedTracker** | TDSC 2024 | Global feature WM + local backdoor for **traitor tracing** |
+| **FedCIP** | 2023 | Client IP + traitor tracking, client-selection routine |
+| **Merkle-Sign** | 2021 | Scales to ~200 clients (cross-device) |
+| **RobWE** | 2024 (arXiv 2402.19054) | Personalized-FL watermarking, head/backbone split |
+| **FedSOV / FedZKP / FedRight / FedCrypt / RISE / WFB** | 2023–2025 | Signature/ZKP/HE/split-FL/blockchain variants — ownership, not FR detection |
+
+### E. Surveys (use for the related-work table + taxonomy)
+| Paper | Venue / year | Read for |
+|---|---|---|
+| **Lansari et al.** — When FL Meets Watermarking: A Comprehensive Overview | MAKE 2023 (MDPI 5(4):70) | The taxonomy: white-box/feature vs black-box/backdoor, client- vs server-side, detection rules, aggregation interactions |
+| **Boenisch** — Survey on model watermarking | 2020 | Centralized WM taxonomy |
+| **Li, Wang, Liew** / **Xue et al.** — IP protection taxonomy | 2021–2022 | Attacks & evaluation criteria |
+
+---
+
+## 2. Deep dives (the ones you flagged + your target)
+
+### 2.1 FareMark / FRAD — the scheme you attack
+**Idea.** "Box-free" watermarking for free-rider detection: honest clients who actually
+train the global model can embed a private, per-client mark that is read purely from the
+model's **outputs**; a free-rider who didn't train can't reproduce it. Each client is
+assigned a **unique trigger class** (to avoid inter-client conflict), holds a secret key,
+and the server verifies every round on held-out trigger-class images. A **memory-enhancing
+local update** fuses the different clients' marks into one global model.
+
+**Decision rule (from your repro).** Per client, per round: compute BER between the
+recovered bits (from the trigger-class softmax) and the client's key; flag if
+`BER ≥ η`, with `η = μ + 3σ` estimated from honest behavior. This is the exact rule your
+paper grants an **oracle** value for.
+
+**Why it's attackable (your thesis).** The mark is decoded from the output layer only, so
+the free-rider needs to keep just that layer in watermark-shape — cheap.
+
+**Sections to read (when you get the PDF):**
+- Method / scheme design → the **embedding loss** and the **memory-enhancing update**
+  (maps to your `wm_lambda`, `wm_beta`).
+- Verification / detection → the **BER metric and threshold** (this is the decision rule
+  you generalize; confirm whether flagging is per-round hard-threshold or aggregated).
+- Free-rider experiments → which baselines they test (previous-model, Gaussian) — these
+  are your H5/H6 positive controls, and the gap you exploit (they never test an *adaptive*
+  FR).
+- Table V (trigger-sample consistency) → the memorisation-vs-generalisation caveat your
+  `paper_check.py` already probes.
+
+### 2.2 FedIPR (Li et al., TPAMI 2023) — the "other defense to attack"
+**Idea.** Universal FL ownership verification embedding **two** watermarks per client:
+1. **Feature-based (white-box):** a sign-loss regularizer forces the **signs of
+   normalization-layer scale weights (γ)** to match secret bits via a secret embedding
+   matrix `M`. Detection = fraction of correct signs.
+2. **Backdoor-based (black-box):** a private trigger set; detection = trigger accuracy.
+Verification passes if detection error < threshold. Reported: feature-based detection
+stays ~100% even at low embedding budget; the **backdoor detection drops to ~62%** under
+pressure — a weakness worth noting.
+
+**Your flagged point ("Algo 3, l.11 → output-layer only").** FedIPR's feature-based bits
+live in **normalization layers spread through the network**, not the output layer — so the
+literal "take only the output layer" reduction applies cleanly to the **backdoor branch**
+(pure output behavior) and, for the feature branch, only if you restrict `M` to the final
+layer's parameters. For your *attack* framing, FedIPR matters because its **backdoor
+branch is another output-behavior + threshold detector** the submarine should evade; its
+feature branch is out of scope (interior weights).
+
+**Sections to read (arXiv 2109.13236):**
+- Section 3 (method) → the **sign-loss** definition and **where bits are embedded**
+  (confirm normalization-layer scales).
+- **Algorithm 3** → the embedding/verification loop (your l.11 note).
+- Section on **detection rate / threshold** → their decision rule and the feature-vs-
+  backdoor detection-rate gap (the 100% vs 62% result, Table ~12).
+- Non-IID tables (Dirichlet β=0.1, 1) → directly comparable to your E/EA groups.
+
+### 2.3 DICTION (Bellafqira & Coatrieux, 2022) — theory / unified framework
+**Idea.** A **unified formalism for white-box watermarking** (Section 2.2 — the "classic"
+one you flagged) that casts existing schemes (Uchida, DeepSigns, RIGA) as instances of a
+common template, then derives DICTION: a **dynamic** scheme using a **GAN-trained extractor**
+and **latent-space (OOD) triggers**. Not FL, not output-layer — but the **formal template**
+(target model + trigger/latent input + extractor + projection → recovered bits → BER) is
+exactly the abstraction you want for your **generic reference detector**, just retargeted
+from weights/activations to the **output softmax**.
+
+**Sections to read (arXiv 2210.15745):**
+- **Section 2 / 2.2 — the unified framework** (embed = projection of a secret through an
+  extractor; verify = BER of recovered vs target bits). **Borrow this formalism.**
+- The embed/extract equations → to write your generic `(key, extractor, projection, BER,
+  threshold)` tuple.
+- Robustness attacks section → the fine-tune/prune/overwrite attack menu (useful to
+  contrast: your attack is a *free-rider evasion*, not a removal attack).
+
+### 2.4 Excluded but cite-for-completeness
+- **Uchida (2017):** watermark in mean of conv-filter weights via an embedding
+  regularizer — canonical **static white-box**. Whole-model → excluded.
+- **RIGA (2021):** adversarial regularizer for **covert** white-box embedding. Whole-model
+  → excluded.
+- **DeepSigns (2019):** **dynamic** white-box in activation maps; the scheme DICTION
+  extends. Post-processing flavor → excluded, but read its BER-on-activations decision as
+  a precedent for "detection error < threshold."
+- **WAFFLE (2021):** **server-side** backdoor at aggregation. Explicitly **not** a free-
+  rider detector (free-rider inherits the global mark). Cite to justify *why FR detection
+  must be client-side*.
+
+### 2.5 Lansari survey (MAKE 2023) — your related-work backbone
+Use this to fill the §3 family table and to phrase the taxonomy: **feature-based
+(white-box, interior weights)** vs **backdoor-based (black-box, output behavior)**;
+**client-side** (needed for FR detection) vs **server-side** (ownership only); and the
+interaction with **robust aggregation** (Krum/Trim-mean can reject watermarked updates
+because they sit far apart — a nice aside for your discussion).
+
+**Sections to read (MDPI 5(4):70):** the taxonomy/section that separates white-box vs
+black-box and client- vs server-side; the table of schemes with their metrics and
+decision rules; the "defensive aggregation vs watermarking" subsection.
+
+---
+
+## 3. Building the generic reference detector (synthesis)
+
+Abstract every output-layer FR detector into one tuple, granting the server an **oracle**
+threshold:
+
+```
+Generic output-layer watermark FR detector D:
+  - key            k_i          per-client secret (bits B_i, key/embedding M_i)
+  - trigger        T_i          held-out inputs (a trigger CLASS, or a trigger SET)
+  - readout        R(model, T_i) -> recovered bits   (from the OUTPUT softmax only)
+  - metric         e_i = BER( R(model,T_i), B_i )    (or 1 - trigger accuracy)
+  - decision       flag client i  iff  e_i >= eta     (eta = ORACLE, best-case)
+```
+
+Map the instances onto the tuple (this is your §4 table):
+
+| Knob | FareMark/FRAD | FedIPR (backdoor) | Yang client-side backdoor |
+|---|---|---|---|
+| trigger T | one trigger **class** per client | private **trigger set** | private trigger set |
+| readout R | multi-bit from trigger-class softmax | trigger-set predictions | trigger predictions |
+| metric e | **BER** vs key | trigger **error rate** | misclassification rate |
+| threshold η | μ+3σ (you set **oracle**) | fixed error threshold | fixed threshold |
+| embed loss | L_wm + memory update | backdoor CE + (sign loss, excluded) | backdoor CE |
+
+**The invariant your attack needs:** in every row, `R` reads **only** the output layer.
+So the submarine's job is identical across schemes — keep the output-layer response in
+watermark-shape (graft) while coasting on the copied global core. That's what makes the
+result about the **approach**, not one paper.
+
+**What to standardize in the paper:**
+1. State the tuple + the oracle threshold once (§4).
+2. Show FareMark, FedIPR-backdoor, Yang as parameterizations (one table).
+3. Prove/argue the reduction: mark ⟂ interior weights given the output layer, so
+   evasion cost ∝ output-layer parameter count ≪ full model (your ELI5 intuition,
+   formalized).
+
+---
+
+## 4. Reading checklist (in priority order)
+
+1. **FareMark PDF** — decision rule + memory update + FR baselines tested (confirm the
+   μ+3σ hard per-round rule; confirm they never test adaptive FRs).
+2. **FedIPR §3 + Algorithm 3 + detection-rate tables** — the backdoor-branch decision and
+   the 100%-vs-62% feature/backdoor gap; your "l.11 output-layer only" note.
+3. **DICTION §2.2 unified framework** — borrow the `(key, extractor, projection, BER)`
+   formalism for your generic detector; retarget to the output softmax.
+4. **Lansari survey taxonomy + tables** — fill the §3 family table; server-side vs
+   client-side justification; aggregation caveat.
+5. **FRAD** — confirm relationship to FareMark (same authors/scheme?) so you cite the line
+   of work correctly.
+6. Skim **WAFFLE** (why server-side ≠ FR detection) and **DeepSigns** (dynamic-WM
+   precedent) only for one-line citations.
+
+Open items to resolve from primary sources (I could not verify these from search):
+- FareMark's exact flag semantics (per-round hard threshold vs aggregated over rounds) —
+  your meeting note asks this; get it from the PDF.
+- Whether FRAD and FareMark are the same paper/extension.
+- FedIPR Algorithm 3 line 11 wording — confirm the output-layer restriction is literally
+  supported.

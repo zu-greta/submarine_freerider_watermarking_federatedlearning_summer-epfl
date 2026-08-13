@@ -1320,6 +1320,153 @@ def tap_effort(a):
 # ###########################################################################
 # ##  CLI                                                                   ##
 # ###########################################################################
+
+# ###########################################################################
+# ##  POOLED views  --  reproduce the paper's single global watermark      ##
+# ##  number, and expose the per-class band that the mean averages over.   ##
+# ###########################################################################
+PAPER_ACC_RESNET_C100 = 99.71   # FareMark Table II: ResNet-18 / CIFAR-100 / 100 clients, all-honest
+
+def _families_of(a):
+    """Families to pool: --families wins, else the single --family."""
+    if getattr(a, "families", None):
+        return list(a.families)
+    return [a.family] if a.family else [None]
+
+def _perclass_floors(runs, tail):
+    """{trigger_class: floor}. Floor = tail-mean of the seed-averaged per-round
+    honest BER -- identical definition to honest_lines, so the pooled band and the
+    per-family floor figures agree bit-for-bit."""
+    by_cr = defaultdict(lambda: defaultdict(list))
+    max_round = 0
+    for r in runs:
+        for h in r.get("history", []):
+            rd = h.get("round")
+            if rd is None:
+                continue
+            max_round = max(max_round, rd)
+            for p in (h.get("wm_per_client") or []):
+                if p.get("is_free_rider") or p.get("ber") is None:
+                    continue
+                by_cr[int(p["trigger_class"])][rd].append(float(p["ber"]))
+    rounds = list(range(1, max_round + 1))
+    floors = {}
+    for c in by_cr:
+        tv = [np.mean(by_cr[c][rd]) for rd in rounds[-tail:] if by_cr[c].get(rd)]
+        if tv:
+            floors[c] = float(np.mean(tv))
+    return floors
+
+def _pooled_round_ber(runs):
+    """{round: [ber over every honest client-round]} pooled across runs."""
+    out = defaultdict(list)
+    for r in runs:
+        for h in r.get("history", []):
+            rd = h.get("round")
+            if rd is None:
+                continue
+            for p in (h.get("wm_per_client") or []):
+                if p.get("is_free_rider") or p.get("ber") is None:
+                    continue
+                out[rd].append(float(p["ber"]))
+    return out
+
+
+def pooled_band(a):
+    """Per-class honest BER floor for EVERY trigger class, pooled across
+    A1 + T1 + T2 (+ T3), ranked. Exposes the whole difficulty band that the
+    paper's single mean number hides.  -> pooled_band_AT."""
+    tail = a.tail or TAIL
+    fams = _families_of(a)
+    allruns = load(a.inp)
+    fam_floors = {}                                   # family -> (floors dict, nseed)
+    for f in fams:
+        rs = honest_runs(allruns, f)
+        if not rs:
+            print(f"  (pooled_band: no honest runs for family {f})"); continue
+        fam_floors[f] = (_perclass_floors(rs, tail), len(rs))
+    if not fam_floors:
+        print("pooled_band: nothing to plot."); return
+
+    pts = [(c, v, f) for f, (fl, _n) in fam_floors.items() for c, v in fl.items()]
+    pts.sort(key=lambda t: t[1])                       # rank by floor
+    floors_all = [v for _c, v, _f in pts]
+    mean_ber = float(np.mean(floors_all)); mean_acc = 100.0 * (1.0 - mean_ber)
+
+    cmap = plt.get_cmap("tab10")
+    fcolor = {f: cmap(i % 10) for i, f in enumerate(fam_floors)}
+
+    fig, ax = plt.subplots(figsize=(12, 6.0))
+    xs = np.arange(len(pts))
+    for x, (c, v, f) in zip(xs, pts):
+        ax.vlines(x, 0, v, color=fcolor[f], lw=1.0, alpha=0.55)
+        ax.plot(x, v, "o", color=fcolor[f], ms=5)
+    ax.axhline(mean_ber, color=BLACK, ls="--", lw=2,
+               label=f"pooled mean BER = {mean_ber:.3f}  (acc {mean_acc:.2f}%)")
+    ax.axhline(ETA_TIGHT_IID, color=GREY, ls=":", lw=1.5,
+               label=f"{LBL_ETA_TIGHT} = {ETA_TIGHT_IID:.3f}")
+    for f, (fl, n) in fam_floors.items():
+        ax.plot([], [], "o", color=fcolor[f], label=f"{f}  ({len(fl)} cls · {n} seed)")
+    ax.set_xlabel("trigger class (ranked by honest BER floor)")
+    ax.set_ylabel(LBL_BER_HONEST)
+    ax.set_ylim(bottom=min(0.0, min(floors_all) - 0.01))
+    n_cls = len(pts); hard = sum(v > ETA_TIGHT_IID for v in floors_all)
+    ax.set_title(f"Honest BER floor per trigger class · pooled {'+'.join(fam_floors)}\n"
+                 f"{n_cls} classes · mean acc {mean_acc:.2f}% · "
+                 f"{hard}/{n_cls} classes above η tight ({ETA_TIGHT_IID:.3f})")
+    ax.legend(fontsize=8, ncol=2, loc="upper left")
+    finish(fig, a.out or "pooled_band")
+    print(f"pooled_band: {n_cls} classes · mean BER {mean_ber:.4f} (acc {mean_acc:.2f}%) · "
+          f"min {min(floors_all):.3f} · max {max(floors_all):.3f}")
+
+
+def pooled_mean(a):
+    """Paper-style single global number: pooled honest watermark accuracy
+    (=100*(1-BER)) per round, converging to a tail mean +/- std to line up
+    against FareMark Table II.  -> pooled_mean_AT."""
+    tail = a.tail or TAIL
+    fams = _families_of(a)
+    allruns = load(a.inp)
+    runs = []
+    for f in fams:
+        runs += honest_runs(allruns, f)
+    if not runs:
+        print("pooled_mean: no honest runs matched."); return
+
+    by_round = _pooled_round_ber(runs)
+    rounds = sorted(by_round)
+    ber_mean = np.array([np.mean(by_round[r]) for r in rounds])
+    ber_std  = np.array([np.std(by_round[r])  for r in rounds])
+    acc_mean = 100.0 * (1.0 - ber_mean)
+
+    tail_rounds = rounds[-tail:]
+    tail_vals = [b for r in tail_rounds for b in by_round[r]]
+    t_ber = float(np.mean(tail_vals)); t_std = float(np.std(tail_vals))
+    t_acc = 100.0 * (1.0 - t_ber); t_acc_std = 100.0 * t_std
+
+    fig, ax = plt.subplots(figsize=(11, 5.6))
+    if tail and len(rounds) > tail:
+        ax.axvspan(rounds[-tail] - 0.5, rounds[-1] + 0.5, color="#DDDDDD",
+                   alpha=0.35, lw=0, label=f"converged tail (last {tail})")
+    ax.plot(rounds, acc_mean, color=C_HONEST, lw=2.4,
+            label="pooled watermark acc (mean over all honest clients)")
+    ax.fill_between(rounds, 100*(1-(ber_mean+ber_std)), 100*(1-(ber_mean-ber_std)),
+                    color=C_HONEST, alpha=0.15)
+    ax.axhline(t_acc, color=BLACK, ls="--", lw=2,
+               label=f"converged mean = {t_acc:.2f}% ± {t_acc_std:.2f}")
+    ax.axhline(PAPER_ACC_RESNET_C100, color=C_FR, ls=(0, (5, 2)), lw=2,
+               label=f"paper Table II (ResNet/C100) = {PAPER_ACC_RESNET_C100:.2f}%")
+    ax.set_xlabel(LBL_ROUND)
+    ax.set_ylabel("watermark detection accuracy (%) = 100·(1 − BER)")
+    ax.set_ylim(top=100.8)
+    ax.set_title(f"Pooled honest watermark accuracy · {'+'.join(fams)}\n"
+                 f"{len(runs)} runs · converged {t_acc:.2f}% vs paper {PAPER_ACC_RESNET_C100:.2f}%")
+    ax.legend(fontsize=8, loc="lower right")
+    finish(fig, a.out or "pooled_mean")
+    print(f"pooled_mean: converged watermark acc {t_acc:.2f}% ± {t_acc_std:.2f} "
+          f"(BER {t_ber:.4f}); paper ref {PAPER_ACC_RESNET_C100:.2f}%")
+
+
 CMDS = {
     "honest_lines": honest_lines,
     "honest_per_round": honest_per_round,
@@ -1334,6 +1481,8 @@ CMDS = {
     "tap_perfr": tap_perfr,
     "tap_perseed": tap_perseed,
     "tap_effort": tap_effort,
+    "pooled_band": pooled_band,
+    "pooled_mean": pooled_mean,
 }
 
 

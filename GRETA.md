@@ -568,19 +568,27 @@ TODO
     - write the storyline proposal + list of experiments to run: aug12
     - create ppt for maxime: aug12 meeting
     [x] storyline proposal draft in md 
-    [] experiment plan in md
-    [] ppt for maxime meeting
-    [] storyline proposal draft in overleaf
+    [x] experiment plan in md
+    [x] ppt for maxime meeting
+    [~] storyline proposal draft in overleaf
 - aug12
-    - present storyline get feedback and finalize storyline and experiments to run
-    - cleanup codebase and results - keep only relevant results and plots for the paper
+    - [x] present storyline get feedback and finalize storyline and experiments to run
+    - [x] cleanup codebase and results - keep only relevant results and plots for the paper
     - run extra experiments from meeting: trigger class accuracy + detection + plotting
+        - rerunning all relevant experiments
     - setup everything to run + run
 - aug13
+    - collect and read output layer watermarking papers and related works 
+    - [x]read how to write a paper and structure of satml papers
+    [x] write paper storyline + draft in overleaf based on current status - to be updated when all results are collected and plotted
+    - finish running all experiments and collect results
+        - [x] A0 + running group A + group T
+        - [~] run the rest of the groups 
     - write paper based on storyline
     - collect results and plot
 - aug14
-    - write paper - add results
+    - write paper based on storyline - add results
+    - finish running all experiments and collect results and plot
 
 ---
 
