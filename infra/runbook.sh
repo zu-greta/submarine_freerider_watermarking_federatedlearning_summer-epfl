@@ -96,20 +96,17 @@ phase_plot(){
 
   # ===================== GROUP T -- honest-band generality (classes 40-49, 90-99) ==
   # Same honest-floor view as A1 but on other CIFAR-100 decades
-  run "$PL honest_lines     --in '$ALL' --family T1_honest_c100_cls4049 --tail 20 --out $OUT/T1_class_floors"
-  run "$PL honest_lines     --in '$ALL' --family T2_honest_c100_cls9099 --tail 20 --out $OUT/T2_class_floors"
-  run "$PL honest_per_round --in '$ALL' --family T1_honest_c100_cls4049 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T1_honest_per_round"
-  run "$PL honest_per_round --in '$ALL' --family T2_honest_c100_cls9099 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T2_honest_per_round"
-  # T3 -- all 100 classes at once (paper setting): floors + per-round view
-  run "$PL honest_lines     --in '$ALL' --family T3_honest_c100_allcls --tail 20 --out $OUT/T3_class_floors"
-  run "$PL honest_per_round --in '$ALL' --family T3_honest_c100_allcls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/T3_honest_per_round"
-  # Pooled across A1 + T decades: the per-class difficulty BAND, and the
-  # paper-style single global watermark-accuracy number (mean over all honest clients).
-  ATFAMS="$HON T1_honest_c100_cls4049 T2_honest_c100_cls9099 T3_honest_c100_allcls"
+  # Every decade is its own 10-client / 10-class honest run; together they cover 0-99.
+  TDECADES="T4_honest_c100_cls1019 T5_honest_c100_cls2029 T8_honest_c100_cls3039 T1_honest_c100_cls4049 T9_honest_c100_cls5059 T6_honest_c100_cls6069 T7_honest_c100_cls7079 T10_honest_c100_cls8089 T2_honest_c100_cls9099"
+  for fam in $TDECADES; do
+    run "$PL honest_lines     --in '$ALL' --family $fam --tail 20 --out $OUT/${fam}_class_floors"
+    run "$PL honest_per_round --in '$ALL' --family $fam --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/${fam}_per_round"
+  done
+  # MERGED honest-floor timeline across A1 + every decade run (scales to 100 classes).
+  ATFAMS="$HON $TDECADES"
+  run "$PL honest_floors_all --in '$ALL' --families $ATFAMS --eta_tight $ETA_T --eta_loose $ETA_L --tail 20 --out $OUT/honest_floors_all"
+  # Ranked per-class band (same data, sorted). Not framed as a paper reproduction.
   run "$PL pooled_band --in '$ALL' --families $ATFAMS --tail 20 --out $OUT/pooled_band_AT"
-  run "$PL pooled_mean --in '$ALL' --families $ATFAMS --tail 20 --out $OUT/pooled_mean_AT"
-  # Cleanest apples-to-apples paper match: T3 alone (100 clients / 100 classes / N_T=100)
-  run "$PL pooled_mean --in '$ALL' --family T3_honest_c100_allcls --tail 20 --out $OUT/pooled_mean_T3"
 
   # ===================== GROUP H -- baseline free-riders (must be CAUGHT) ====
   # Positive controls: base free-riders sit near BER 0.5 

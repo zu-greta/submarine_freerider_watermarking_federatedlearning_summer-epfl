@@ -152,6 +152,18 @@ meeting notes:
 - **No solution proposal — pure attack paper.**
 - Generalise and collect output-layer-watermarking papers for the family table / generality argument.
 
+\section{Storyline (to be removed later)}
+\begin{itemize}
+    \item output layer watermarking is a function of datasets and classes
+    \item honest clients with difficult classes can be above threshold as opposed to freeriders with easy classes
+    \item problem gets amplified for non-iid 
+    \item create a reference algorithm for a generic output layer watermarking scheme 
+    \item submarine attack is a way to generally attack these output layer attacks 
+    \item test for other papers/watermarking schemes 
+    \item prove theoretically if output-layer watermarking is BS (or not) 
+\end{itemize}
+
+Intuition of why the output-layer watermarking is ineffective: honest clients train the entire model while the free-riders can trick only the output-layer to pass the watermarking detection. As the output-layer as very few parameters compared to the entire model, it requires few work to achieve.
 ---
 ---
 ---

@@ -587,6 +587,17 @@ TODO
     - write paper based on storyline
     - collect results and plot
 - aug14
+    - collect and read output layer watermarking papers and related works 
+    - run experiments
+        - finish running baselines - A and T -> check that baseline watermark accuracy matches the paper's for sanity check
+            - [x] prob: instead agg A and T1-T2 to check and run T4-7 if needed later
+            - todo T4-T10
+        - start running submarines
+            - todo D and K 
+            - Y to double check (J)
+        - run the remaining experiments
+            - [x] H Z 
+            - todo E/EA (all non-iid)
     - write paper based on storyline - add results
     - finish running all experiments and collect results and plot
 

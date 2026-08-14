@@ -60,7 +60,14 @@ fi
 # ---------------------------------------------------------------------------
 if has T; then
   SEEDS_T="${SEEDS_T:-0 1 2}"
+  MAP1019="0:10,1:11,2:12,3:13,4:14,5:15,6:16,7:17,8:18,9:19"
+  MAP2029="0:20,1:21,2:22,3:23,4:24,5:25,6:26,7:27,8:28,9:29"
+  MAP3039="0:30,1:31,2:32,3:33,4:34,5:35,6:36,7:37,8:38,9:39"
   MAP4049="0:40,1:41,2:42,3:43,4:44,5:45,6:46,7:47,8:48,9:49"
+  MAP5059="0:50,1:51,2:52,3:53,4:54,5:55,6:56,7:57,8:58,9:59"
+  MAP6069="0:60,1:61,2:62,3:63,4:64,5:65,6:66,7:67,8:68,9:69"
+  MAP7079="0:70,1:71,2:72,3:73,4:74,5:75,6:76,7:77,8:78,9:79"
+  MAP8089="0:80,1:81,2:82,3:83,4:84,5:85,6:86,7:87,8:88,9:89"
   MAP9099="0:90,1:91,2:92,3:93,4:94,5:95,6:96,7:97,8:98,9:99"
   for s in $SEEDS_T; do
     env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP4049" \
@@ -72,13 +79,39 @@ if has T; then
         FAMILY="T2_honest_c100_cls9099" NOTE="T2 honest band, trigger classes 90-99" \
         ./submit_experiment.sh 14 "$s"
   done
-  # -------------------------------------------------------------------------
-  # T3 -- ALL 100 CIFAR-100 classes at once = paper Table II ResNet/CIFAR-100 (covering 0-99)
-  SEEDS_T3="${SEEDS_T3:-0 1 2 3 4 5}"
-  for s in $SEEDS_T3; do
-    env ATTACK=none NUM_FREE_RIDERS=0 NUM_CLIENTS=100 WM_NUM_TRIGGERS=100 ROUNDS=50 \
-        FAMILY="T3_honest_c100_allcls" \
-        NOTE="T3 honest, ALL 100 classes (100 clients, N_T=100) -- paper ResNet/CIFAR-100 setting" \
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP1019" \
+        FAMILY="T4_honest_c100_cls1019" NOTE="T4 honest band, trigger classes 10-19" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP2029" \
+        FAMILY="T5_honest_c100_cls2029" NOTE="T5 honest band, trigger classes 20-29" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP6069" \
+        FAMILY="T6_honest_c100_cls6069" NOTE="T6 honest band, trigger classes 60-69" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP7079" \
+        FAMILY="T7_honest_c100_cls7079" NOTE="T7 honest band, trigger classes 70-79" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP3039" \
+        FAMILY="T8_honest_c100_cls3039" NOTE="T8 honest band, trigger classes 30-39" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP5059" \
+        FAMILY="T9_honest_c100_cls5059" NOTE="T9 honest band, trigger classes 50-59" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_T; do
+    env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 TRIGGER_CLASS_MAP="$MAP8089" \
+        FAMILY="T10_honest_c100_cls8089" NOTE="T10 honest band, trigger classes 80-89" \
         ./submit_experiment.sh 14 "$s"
   done
 fi
@@ -184,16 +217,42 @@ if has K; then
   for s in $SEEDS_K; do
     env $kbase TAP_SCOPE=block2 \
         FAMILY="K4_alldyn_block2_c36" \
-        NOTE="K4 all-dynamic + block2 sawtooth (self-eta, derived margin, dynamic warmup)" \
+        NOTE="K4 hard classes all-dynamic + block2 sawtooth (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K5 -- full scope
   for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=full \
-        FAMILY="K5_alldyn_full_c36" \
-        NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
+    env $kbase TAP_SCOPE=block2 \
+        FAMILY="K4_alldyn_block2_c17" \
+        NOTE="K4 easy classes all-dynamic + block2 sawtooth (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
+  # K6 -- tweaked block2 submarine - max coast longer, graft decay slower, margin fixed (ablation vs K4)
+  k6base="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+         AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 \
+         TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+         TAP_MARGIN=0.03 TAP_MARGIN_MODE=fixed TAP_MAX_COAST=12 TAP_GRAFT_DECAY=0.10 \
+         ROUNDS=50 FAST_DATA=1 TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
+         TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+         TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2"
+  for s in $SEEDS_K; do
+    env $k6base FREE_RIDER_IDS=1,7 \
+        FAMILY="K6_costopt_block2_c36" \
+        NOTE="K6 cost-optimised block2 (max_coast12, graft_decay0.10, fixed margin) -- fewer taps than K4" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # K7 -- hard-class data bump: same as K6 but cpc 5->10 to pull cls6 BER toward the honest floor
+  for s in $SEEDS_K; do
+    env $k6base TAP_DATA_CPC=10 FAMILY="K7_costopt_block2_cpc10_c36" \
+        NOTE="K7 = K6 with TAP_DATA_CPC=10 (more embed signal on the hard class)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # K5 -- full scope (skip)
+  # for s in $SEEDS_K; do
+  #   env $kbase TAP_SCOPE=full \
+  #       FAMILY="K5_alldyn_full_c36" \
+  #       NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
 fi
 
 # ---------------------------------------------------------------------------
@@ -216,7 +275,7 @@ fi
 #   free-rider is given the true threshold (AUTOP_ORACLE_ETA=0.264, target 0.234)
 # ---------------------------------------------------------------------------
 if has Y; then
-  SEEDS_Y="${SEEDS_Y:-0}"                      # single seed 
+  SEEDS_Y="${SEEDS_Y:-0 1 2}"                      # single seed 
   jbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_ETA_SOURCE=oracle \
          TAP_PROBE_HOLDOUT=16 TAP_SCOPE=block2 TAP_COAST_MODE=graft TAP_WHEN=threshold \

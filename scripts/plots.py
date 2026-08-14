@@ -1467,6 +1467,83 @@ def pooled_mean(a):
           f"(BER {t_ber:.4f}); paper ref {PAPER_ACC_RESNET_C100:.2f}%")
 
 
+
+def honest_floors_all(a):
+    """Merged honest-floor timeline across every decade family (A1 + T1..T7 ...),
+    10 clients at a time. One faint BER-vs-round line per (family,class), colored
+    by that class's converged floor; bold pooled mean; eta lines."""
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+    tail = a.tail or TAIL
+    fams = _families_of(a)
+    allruns = load(a.inp)
+    et, el = eta_pair(a)
+
+    # {(fam,cls): {round: mean_ber_over_seeds}}, and floors
+    series, floors, max_round = {}, {}, 0
+    n_seeds = {}
+    for f in fams:
+        rs = honest_runs(allruns, f)
+        if not rs:
+            print(f"  (honest_floors_all: no honest runs for {f})"); continue
+        n_seeds[f] = len(rs)
+        by_cr = defaultdict(lambda: defaultdict(list))
+        for r in rs:
+            for h in r.get("history", []):
+                rd = h.get("round")
+                if rd is None: continue
+                max_round = max(max_round, rd)
+                for p in (h.get("wm_per_client") or []):
+                    if p.get("is_free_rider") or p.get("ber") is None: continue
+                    by_cr[int(p["trigger_class"])][rd].append(float(p["ber"]))
+        for c in by_cr:
+            series[(f, c)] = {rd: float(np.mean(v)) for rd, v in by_cr[c].items()}
+    if not series:
+        print("honest_floors_all: nothing to plot."); return
+    rounds = list(range(1, max_round + 1))
+    for key, s in series.items():
+        tv = [s[rd] for rd in rounds[-tail:] if rd in s]
+        floors[key] = float(np.mean(tv)) if tv else float("nan")
+
+    fl_vals = [v for v in floors.values() if v == v]
+    fmax = max(fl_vals); fmean = float(np.mean(fl_vals))
+    norm = Normalize(vmin=0.0, vmax=max(fmax, et))
+    cmap = plt.get_cmap("viridis")
+
+    fig, ax = plt.subplots(figsize=(13, 6.2))
+    if tail and max_round > tail:
+        ax.axvspan(max_round - tail + 0.5, max_round + 0.5, color="#DDDDDD",
+                   alpha=0.30, lw=0, zorder=0)
+    # per-class faint lines, colored by floor
+    for key, s in sorted(series.items(), key=lambda kv: floors[kv[0]]):
+        y = [s.get(rd, np.nan) for rd in rounds]
+        ax.plot(rounds, y, color=cmap(norm(floors[key])), lw=1.0, alpha=0.55, zorder=2)
+    # bold pooled mean over every honest client-round
+    pooled = []
+    for rd in rounds:
+        vals = [s[rd] for s in series.values() if rd in s]
+        pooled.append(np.mean(vals) if vals else np.nan)
+    ax.plot(rounds, pooled, color=BLACK, lw=2.6, zorder=5, label="pooled mean BER (all classes)")
+    ax.axhline(et, color=BLACK, ls="--",       lw=1.8, zorder=4, label=f"{LBL_ETA_TIGHT} = {et:.3f}")
+    ax.axhline(el, color=C_HONEST, ls=(0,(5,2)),lw=1.8, zorder=4, label=f"{LBL_ETA_LOOSE} = {el:.3f}")
+
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap); sm.set_array([])
+    cb = fig.colorbar(sm, ax=ax, pad=0.01); cb.set_label("converged honest BER floor")
+
+    n_cls = len(series); n_fam = len({f for f, _ in series})
+    n_hard = sum(v > et for v in fl_vals)
+    ax.set_xlabel(LBL_ROUND); ax.set_ylabel(LBL_BER_HONEST)
+    ax.set_ylim(bottom=-0.02)
+    seedtxt = ",".join(f"{f.split('_')[0]}:{n_seeds.get(f,0)}s" for f in fams if f in n_seeds)
+    ax.set_title(f"Honest BER floor per trigger class · {n_cls} classes across {n_fam} decade-runs "
+                 f"(10 clients each)\nmean floor {fmean:.3f} · {n_hard}/{n_cls} classes above "
+                 f"{LBL_ETA_TIGHT} ({et:.3f}) · [{seedtxt}]")
+    ax.legend(fontsize=8, loc="upper right")
+    finish(fig, a.out or "honest_floors_all")
+    print(f"honest_floors_all: {n_cls} classes / {n_fam} families · mean floor {fmean:.4f} · "
+          f"{n_hard} above eta_tight · max {fmax:.3f}")
+
+
 CMDS = {
     "honest_lines": honest_lines,
     "honest_per_round": honest_per_round,
@@ -1483,6 +1560,7 @@ CMDS = {
     "tap_effort": tap_effort,
     "pooled_band": pooled_band,
     "pooled_mean": pooled_mean,
+    "honest_floors_all": honest_floors_all,
 }
 
 
