@@ -70,7 +70,7 @@ def parse_args():
                         "(same-trigger-class control; overrides cid%%num_classes)")
     # ---- free-rider selection ----
     p.add_argument("--attack", type=str, default=None,
-                   choices=["none", "previous_models", "gaussian", "submarine", "autopilot", "reduced", "adaptive_tap"])
+                   choices=["none", "previous_models", "gaussian", "submarine", "autopilot", "reduced", "adaptive_tap", "graftblock"])
     p.add_argument("--num_free_riders", type=int, default=None)
     p.add_argument("--free_rider_ids", type=str, default=None,
                    help="pin which cids free-ride, e.g. '3,6' (overrides the seeded choice)")
