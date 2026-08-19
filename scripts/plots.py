@@ -88,6 +88,9 @@ LBL_FR_MEAN     = "free-rider mean BER"
 LBL_HONEST_TWIN = "honest same-class twin"      # + " (class {c})"
 LBL_FR_SERVER   = "FR server-measured BER"
 LBL_FR_PROBE    = "FR self-probe (drives tap/coast)"
+LBL_FR_ETA      = "FR est. threshold η̂ (frozen)"   # self-estimated (or oracle) eta the FR uses
+LBL_FR_TARGET   = "FR tap target (η̂ − margin)"     # probe > target  ⇒  tap
+LBL_HONEST_MEAN_FRCLS = "honest mean BER @ FR class(es)"  # timeline: honest BER on the FR's own class
 
 # titles # TEXT 
 TITLE_HONEST_LINES = "Honest BER per trigger class"                       
@@ -625,6 +628,59 @@ def _majority_marks(tap_ct, coa_ct, rounds):
     return taps, coasts
 
 
+def _is_H_family(family) -> bool:
+    """True for the baseline-free-rider positive controls (H5_prevmodel, H6_gaussian, ...).
+    Used to suppress the thin per-client FR lines on the H timelines only."""
+    return bool(family) and re.match(r"^H\d", str(family)) is not None
+
+
+def _fr_self_signals(runs):
+    """Aggregate the adaptive (submarine) free-rider's own bookkeeping across seeds and
+    FR cids, for overlaying on a timeline:
+
+        probe_mean {round: mean self-probed BER (trace 'ber_before')}   -> why it taps
+        eta_est    frozen estimated threshold the FR used (median)      -> the FR's η̂
+        target     frozen tap target = η̂ - margin (median)             -> probe>target ⇒ tap
+        defect     first free-ride round (min over FRs/seeds)
+
+    All values are None/empty when the family is NOT an adaptive_tap run (the
+    previous_models / gaussian / reduced traces carry no probe/eta/target), so the
+    caller can simply skip drawing them -- the A/D/E/H timelines are unchanged."""
+    probe = defaultdict(list)
+    etas, margins, targets, defects = [], [], [], []
+    for r in runs:
+        comp = (r.get("compute", {}) or {}).get("per_client", {}) or {}
+        for c in comp.values():
+            if not c.get("is_free_rider"):
+                continue
+            for t in (c.get("trace") or []):
+                rd = t.get("round")
+                if t.get("ber_before") is not None and rd is not None:
+                    probe[rd].append(float(t["ber_before"]))
+                e = t.get("eta_frozen", None)
+                if e is None:
+                    e = t.get("eta_self_est", None)
+                if e is not None:
+                    etas.append(float(e))
+                if t.get("margin_used") is not None:
+                    margins.append(float(t["margin_used"]))
+                if t.get("target") is not None:
+                    targets.append(float(t["target"]))
+                if t.get("defect_round") is not None:
+                    defects.append(int(t["defect_round"]))
+    probe_mean = {rd: float(np.mean(v)) for rd, v in probe.items() if v}
+    eta_est = float(np.median(etas)) if etas else None
+    # keep target consistent with eta: target = max(0, median_eta - median_margin)
+    if eta_est is not None and margins:
+        target = max(0.0, eta_est - float(np.median(margins)))
+    elif eta_est is not None and targets:
+        target = min(float(np.median(targets)), eta_est)
+    else:
+        target = float(np.median(targets)) if targets else None
+    defect = min(defects) if defects else None
+    return probe_mean, eta_est, target, defect
+
+
 def timeline(a):
     """BER over rounds: honest mean band, free-rider mean band, taps/coasts, 
     frozen eta lines, and (--honest_in) honest floor at the FR's own classes.
@@ -637,6 +693,11 @@ def timeline(a):
     agg = nseed > 1
     r_ref = runs[0]
     rounds = [h["round"] for h in r_ref.get("history", [])]
+
+    # H plots (positive controls) ONLY: drop the thin per-client FR lines. Auto-detected
+    # from the family name (H5_/H6_/...), or forced with --no_fr_indiv. Every other group
+    # keeps its individual FR lines.
+    hide_fr_indiv = _is_H_family(a.family) or bool(getattr(a, "no_fr_indiv", False))
 
     taps, coasts = defaultdict(int), defaultdict(int)
     for r in runs:
@@ -681,10 +742,11 @@ def timeline(a):
                         label="free-rider mean ± std")
         ax.plot(rounds, f_mean, color=C_FR, lw=3, label=LBL_FR_MEAN)
         done = False
-        for (_, _), tr in sorted(fr_indiv.items()):
-            n = min(len(tr), len(rounds))
-            ax.plot(rounds[:n], tr[:n], color=C_FR, lw=0.7, alpha=.35, zorder=2,
-                    label=("individual free-riders" if not done else None)); done = True
+        if not hide_fr_indiv:
+            for (_, _), tr in sorted(fr_indiv.items()):
+                n = min(len(tr), len(rounds))
+                ax.plot(rounds[:n], tr[:n], color=C_FR, lw=0.7, alpha=.35, zorder=2,
+                        label=("individual free-riders" if not done else None)); done = True
         doneh = False
         for (_, _), tr in sorted(hon_sameclass.items()):
             n = min(len(tr), len(rounds))
@@ -702,9 +764,10 @@ def timeline(a):
                 (freer if p.get("is_free_rider") else honest).setdefault(p["cid"], {})[h["round"]] = p["ber"]
         for cid in honest:
             ax.plot(rounds, [honest[cid].get(rd, np.nan) for rd in rounds], color=C_HONEST, lw=0.8, alpha=.25)
-        for cid in freer:
-            ax.plot(rounds, [freer[cid].get(rd, np.nan) for rd in rounds], color=C_FR, lw=0.9, alpha=.5,
-                    label=f"free-rider cid {cid}")
+        if not hide_fr_indiv:
+            for cid in freer:
+                ax.plot(rounds, [freer[cid].get(rd, np.nan) for rd in rounds], color=C_FR, lw=0.9, alpha=.5,
+                        label=f"free-rider cid {cid}")
         ax.plot(rounds, h_mean, color=C_HONEST, lw=2.8, label=LBL_HONEST_MEAN)
         ax.plot(rounds, f_mean, color=C_FR, lw=2.8, label=LBL_FR_MEAN)
         tapx, coax = _majority_marks(taps, coasts, rounds)
@@ -719,6 +782,24 @@ def timeline(a):
         ax.axvline(W - 0.5, color=GREY, ls="--", lw=1.6)
     ax.axhline(eta_t, color=BLACK, ls="--", lw=2.2, label=f"{LBL_ETA_TIGHT} (frozen) = {eta_t:.3f}")
     ax.axhline(eta_l, color="#3B6FB5", ls=(0, (5, 2)), lw=2.0, label=f"{LBL_ETA_LOOSE} (ref) = {eta_l:.3f}")
+
+    # --- adaptive free-rider self-bookkeeping overlay (submarine K/J only) ---------
+    # Shows WHY it taps: the FR's self-probed BER vs its own frozen target (probe>target
+    # ⇒ tap) and its estimated threshold η̂. Empty (skipped) for A/D/E/H/reduced runs.
+    probe_mean, fr_eta, fr_target, defect = _fr_self_signals(runs)
+    if probe_mean:
+        px = sorted(probe_mean); py = [probe_mean[r] for r in px]
+        ax.plot(px, py, color=OKABE["orange"], lw=1.4, ls=(0, (4, 2)), marker=".", ms=5,
+                zorder=4, label=LBL_FR_PROBE)
+    if rounds:
+        x0 = (defect if defect is not None else W) - 0.5
+        x1 = max(rounds) + 0.5
+        if fr_eta is not None:
+            ax.hlines(fr_eta, x0, x1, color=OKABE["purple"], ls=(0, (6, 2)), lw=1.8,
+                      zorder=4, label=f"{LBL_FR_ETA} = {fr_eta:.3f}")
+        if fr_target is not None:
+            ax.hlines(fr_target, x0, x1, color=OKABE["green"], ls=(0, (2, 2)), lw=1.6,
+                      zorder=4, label=f"{LBL_FR_TARGET} = {fr_target:.3f}")
 
     # honest floor at the FR's own trigger classes (fair band), via --honest_in
     fr_cls = sorted({int(p["trigger_class"]) for r in runs for h in r.get("history", [])
@@ -1057,7 +1138,11 @@ def _submarine(runs, honest_ext=None, honest_family=None):
                         tclass[int(p["cid"])] = int(p["trigger_class"])
     fr_cids = sorted(fr_cids)
 
-    data = {cid: {"tc": tclass.get(cid), "seeds": [], "target": None} for cid in fr_cids}
+    data = {cid: {"tc": tclass.get(cid), "seeds": [], "target": None,
+                  "eta_est": None, "defect": None} for cid in fr_cids}
+    # per-cid accumulators so eta_hat and target come from a CONSISTENT estimate
+    # (median eta_hat, median margin) rather than eta from one seed + target from another.
+    _acc = {cid: {"etas": [], "margins": [], "targets": [], "defects": []} for cid in fr_cids}
     for r in runs:
         srv = {cid: {} for cid in fr_cids}
         for h in r.get("history", []):
@@ -1069,18 +1154,49 @@ def _submarine(runs, honest_ext=None, honest_family=None):
         for cid in fr_cids:
             c = comp.get(str(cid)) or comp.get(cid) or {}
             probe, act = {}, {}
+            seed_eta = seed_margin = seed_target = seed_defect = None
             for t in (c.get("trace") or []):
                 rd, ac = t.get("round"), t.get("action")
                 if t.get("ber_before") is not None:
                     probe[rd] = float(t["ber_before"])
                 if ac in ("tap", "coast"):
                     act[rd] = ac
-                if t.get("target") is not None:
-                    data[cid]["target"] = float(t["target"])
+                if t.get("target") is not None and seed_target is None:
+                    seed_target = float(t["target"])
+                e = t.get("eta_frozen", None)
+                if e is None:
+                    e = t.get("eta_self_est", None)
+                if e is not None and seed_eta is None:
+                    seed_eta = float(e)
+                if t.get("margin_used") is not None and seed_margin is None:
+                    seed_margin = float(t["margin_used"])
+                if t.get("defect_round") is not None and seed_defect is None:
+                    seed_defect = int(t["defect_round"])
+            # one (eta, margin, target, defect) per seed -> aggregate consistently later
+            if seed_eta is not None:
+                _acc[cid]["etas"].append(seed_eta)
+            if seed_margin is not None:
+                _acc[cid]["margins"].append(seed_margin)
+            if seed_target is not None:
+                _acc[cid]["targets"].append(seed_target)
+            if seed_defect is not None:
+                _acc[cid]["defects"].append(seed_defect)
             samp = _cumulative_by_round(r, cid, "samples")
             rounds = sorted(set(srv[cid]) | set(probe) | set(act) | set(samp))
             data[cid]["seeds"].append({"rounds": rounds, "srv": srv[cid], "probe": probe,
                                        "act": act, "samp": samp})
+    # finalize consistent eta_hat / target: target = max(0, median_eta - median_margin)
+    for cid in fr_cids:
+        etas, margins = _acc[cid]["etas"], _acc[cid]["margins"]
+        if etas:
+            eta_med = float(np.median(etas))
+            data[cid]["eta_est"] = eta_med
+            if margins:
+                data[cid]["target"] = max(0.0, eta_med - float(np.median(margins)))
+            elif _acc[cid]["targets"]:
+                data[cid]["target"] = min(float(np.median(_acc[cid]["targets"])), eta_med)
+        if _acc[cid]["defects"]:
+            data[cid]["defect"] = int(min(_acc[cid]["defects"]))
 
     # same-class honest twin: from the attack runs, else the external honest family
     twin = {}
@@ -1161,9 +1277,13 @@ def tap_perfr(a):
 
             ax.axhline(eta_l, color=C_HONEST, ls="--", lw=1.7, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
             ax.axhline(eta_t, color="black", ls=":", lw=1.3, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
+            # the FR's OWN frozen threshold η̂ and tap target (probe>target ⇒ tap)
+            if data[cid]["eta_est"] is not None:
+                ax.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.5,
+                           label=f"{LBL_FR_ETA} = {data[cid]['eta_est']:.3f}")
             if data[cid]["target"] is not None:
-                ax.axhline(data[cid]["target"], color="0.45", ls="-.", lw=1.0,
-                           label=f"target {data[cid]['target']:.3f}")
+                ax.axhline(data[cid]["target"], color=OKABE["green"], ls="-.", lw=1.2,
+                           label=f"{LBL_FR_TARGET} = {data[cid]['target']:.3f}")
 
             frac = _tap_fraction(seeds)
             tail = [smean[i] for i, rd in enumerate(sx) if rd >= W]
@@ -1227,6 +1347,13 @@ def tap_perseed(a):
                            edgecolor=C_FR, zorder=6, label=(LBL_COAST if si == 0 else None))
                 ax.axhline(eta_l, color=C_HONEST, ls="--", lw=1.4)
                 ax.axhline(eta_t, color="black", ls=":", lw=1.1)
+                # FR's own frozen threshold η̂ and tap target (label once, on the top panel)
+                if data[cid]["eta_est"] is not None:
+                    ax.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.3,
+                               label=(f"{LBL_FR_ETA}" if si == 0 else None))
+                if data[cid]["target"] is not None:
+                    ax.axhline(data[cid]["target"], color=OKABE["green"], ls="-.", lw=1.1,
+                               label=(f"{LBL_FR_TARGET}" if si == 0 else None))
                 fr = [ac for ac in s["act"].values()]
                 frac = (fr.count("tap") / len(fr)) if fr else float("nan")
                 ax.set_ylabel(f"seed {runs[si].get('seed', si)}\ntap {frac:.0%}", fontsize=9)
@@ -1283,10 +1410,14 @@ def tap_effort(a):
                 axL.plot(tx, [twin[cid][r] for r in tx], color=C_TWIN, lw=2.0, ls=(0, (1, 1)),
                          label=f"{LBL_HONEST_TWIN} (cls {tc})")
             sx, smean, sstd = _mean_over_seeds(seeds, "srv")
+            px, pmean, _ = _mean_over_seeds(seeds, "probe")
             axL.plot(sx, smean, color=C_FR, lw=2.4, marker="o", ms=3, label=LBL_FR_SERVER)
             if nseed > 1:
                 axL.fill_between(sx, np.array(smean) - np.array(sstd), np.array(smean) + np.array(sstd),
                                  color=C_FR, alpha=.15)
+            if px:
+                axL.plot(px, pmean, color=OKABE["orange"], lw=1.3, ls=(0, (4, 2)), zorder=3,
+                         label=LBL_FR_PROBE)
             srv_at = dict(zip(sx, smean))
             tap_ct, coa_ct = defaultdict(int), defaultdict(int)
             for s in seeds:
@@ -1299,6 +1430,12 @@ def tap_effort(a):
                         edgecolor=C_FR, zorder=6, label=f"{LBL_COAST} [majority]")
             axL.axhline(eta_l, color=C_HONEST, ls="--", lw=1.6, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
             axL.axhline(eta_t, color="black", ls=":", lw=1.2, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
+            if data[cid]["eta_est"] is not None:
+                axL.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.4,
+                            label=f"{LBL_FR_ETA} = {data[cid]['eta_est']:.3f}")
+            if data[cid]["target"] is not None:
+                axL.axhline(data[cid]["target"], color=OKABE["green"], ls="-.", lw=1.2,
+                            label=f"{LBL_FR_TARGET} = {data[cid]['target']:.3f}")
             axL.set_xlabel(LBL_ROUND); axL.set_ylabel(LBL_BER_SHORT)
             axL.set_ylim(-0.03, max(0.62, eta_l + 0.06))
             axL.set_title(f"stealth · cid{cid} · class {tc}", fontsize=11); axL.legend(fontsize=7.5)  # TEXT
@@ -1544,6 +1681,279 @@ def honest_floors_all(a):
           f"{n_hard} above eta_tight · max {fmax:.3f}")
 
 
+
+def overlap(a):
+    """honest per-class BER band vs free-rider on one BER axis. 
+    Honest(hard) can sit above FR(easy) -> the two populations interleave,
+    so no single global threshold separates them.  -> overlap.
+      --families  = honest decade families (define the band)
+      --fr_in     = submarine result glob (FR operating points, auto-detected)"""
+    tail = a.tail or TAIL
+    et, el = eta_pair(a)
+    allruns = load(a.inp)
+
+    # ---- honest per-class floors (the band) ----
+    hruns = []
+    for f in _families_of(a):
+        hruns += honest_runs(allruns, f)
+    hfloors = _perclass_floors(hruns, tail)          # {class: floor}
+    if not hfloors:
+        print("overlap: no honest floors (check --families/--in)."); return
+    hvals = np.array(sorted(hfloors.values()))
+
+    # ---- free-rider operating points from --fr_in ----
+    frruns = load(a.fr_in) if getattr(a, "fr_in", None) else []
+    by = defaultdict(lambda: defaultdict(list))      # (fam,cid,cls) -> {round:[ber]}
+    maxr = 0
+    for r in frruns:
+        fm = fam(r)
+        for h in r.get("history", []):
+            rd = h.get("round")
+            if rd is None: continue
+            maxr = max(maxr, rd)
+            for p in (h.get("wm_per_client") or []):
+                if p.get("is_free_rider") and p.get("ber") is not None:
+                    by[(fm, int(p["cid"]), int(p["trigger_class"]))][rd].append(float(p["ber"]))
+    rounds = list(range(1, maxr + 1))
+    fr_pts = {}
+    for key, d in by.items():
+        tv = [np.mean(d[rd]) for rd in rounds[-tail:] if d.get(rd)]
+        if tv: fr_pts[key] = float(np.mean(tv))
+
+    fig, ax = plt.subplots(figsize=(9.5, 6.2))
+    # honest band + strip
+    lo, hi, mu = float(hvals.min()), float(hvals.max()), float(hvals.mean())
+    ax.axhspan(lo, hi, xmin=0.02, xmax=0.48, color=C_HONEST, alpha=0.10, lw=0)
+    rng = np.random.default_rng(0)
+    hx = 0.25 + (rng.random(len(hvals)) - 0.5) * 0.28
+    ax.scatter(hx, hvals, s=34, color=C_HONEST, alpha=0.8, edgecolor="white",
+               linewidth=0.5, zorder=3, label=f"honest clients ({len(hvals)} classes)")
+    ax.plot([0.05, 0.45], [mu, mu], color=C_HONEST, lw=2, zorder=4)
+    ax.annotate(f"honest mean {mu:.3f}", (0.46, mu), textcoords="offset points",
+                xytext=(4, 0), ha="left", va="center", fontsize=8, color=C_HONEST)
+
+    # FR points, colored by family, x jittered around 0.75
+    fams_seen = sorted({k[0] for k in fr_pts})
+    cmap = plt.get_cmap("tab10")
+    fcol = {fm: cmap(i % 10) for i, fm in enumerate(fams_seen)}
+    for i, fm in enumerate(fams_seen):
+        pts = [(cid, cls, v) for (f2, cid, cls), v in fr_pts.items() if f2 == fm]
+        xs = 0.75 + (np.linspace(-0.12, 0.12, len(pts)) if len(pts) > 1 else [0])
+        for x, (cid, cls, v) in zip(np.atleast_1d(xs), pts):
+            ax.scatter(x, v, s=90, color=fcol[fm], marker="D", edgecolor="black",
+                       linewidth=0.6, zorder=6)
+            ax.annotate(f"cls{cls}", (x, v), textcoords="offset points",
+                        xytext=(7, 0), fontsize=7, va="center")
+        ax.scatter([], [], color=fcol[fm], marker="D", edgecolor="black",
+                   label=f"FR · {fm}")
+
+    ax.axhline(el, color=C_HONEST, ls=(0, (5, 2)), lw=2, zorder=2,
+               label=f"{LBL_ETA_LOOSE} = {el:.3f} (operating threshold)")
+    ax.axhline(et, color=BLACK, ls=":", lw=1.6, zorder=2, label=f"{LBL_ETA_TIGHT} = {et:.3f}")
+    ax.set_xticks([0.25, 0.75]); ax.set_xticklabels(["honest\n(per class)", "free-riders\n(per family/class)"])
+    ax.set_xlim(0, 1.05); ax.set_ylim(bottom=min(-0.01, lo - 0.02))
+    ax.set_ylabel(LBL_BER_HONEST)
+    n_over = int((hvals > el).sum())
+    ax.set_title("Honest band vs free-rider operating points\n"
+                 f"honest floors span {lo:.2f}–{hi:.2f}; FR points sit inside the band "
+                 f"-> no single η separates them")
+    ax.legend(fontsize=7.5, loc="upper left", framealpha=0.95)
+    finish(fig, a.out or "overlap")
+    print(f"overlap: {len(hvals)} honest classes (span {lo:.3f}-{hi:.3f}), "
+          f"{len(fr_pts)} FR points from {len(fams_seen)} families")
+
+
+def roc(a):
+    """Threshold dilemma / ROC.  Per family (setting), sweep eta and compute honest
+    FPR(eta)=P(honest BER>=eta) and free-rider FNR(eta)=P(FR BER<eta) over the tail.
+    Left: FPR (solid) & FNR (dashed) vs eta; dot = min of max(FPR,FNR) (best achievable
+    balanced error). Right: ROC (TPR=1-FNR vs FPR) with AUC. Overlay settings via
+    --families; honest pool = own-run honest clients (+ optional --honest_in).  -> roc_*."""
+    tail = a.tail or TAIL
+    fams = _families_of(a)
+    runs_all = load(a.inp)
+    honest_extra = (converged_perclient(honest_runs(load(a.honest_in), a.honest_family), tail=tail)
+                    if getattr(a, "honest_in", None) else [])
+    grid = np.linspace(0.0, 0.6, 121)
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(13, 5.4))
+    cmap = plt.get_cmap("tab10"); summary = []
+    for i, f in enumerate(fams):
+        runs = pick(runs_all, f) if f else runs_all
+        if not runs:
+            print(f"  (roc skip {f} -- no runs)"); continue
+        hon = np.array(converged_perclient(runs, tail=tail, free_rider=False) + honest_extra)
+        fr = np.array(converged_perclient(runs, tail=tail, free_rider=True))
+        if not len(hon) or not len(fr):
+            print(f"  (roc skip {f}: hon={len(hon)} fr={len(fr)})"); continue
+        fpr = np.array([(hon >= e).mean() for e in grid])
+        fnr = np.array([(fr < e).mean() for e in grid])
+        tpr = 1 - fnr
+        col = cmap(i % 10); lbl = (f or "runs").split("_rep")[0]
+        axL.plot(grid, fpr, color=col, lw=2.0, label=f"{lbl}: FPR")
+        axL.plot(grid, fnr, color=col, lw=2.0, ls="--", label=f"{lbl}: FNR")
+        bal = np.maximum(fpr, fnr); j = int(bal.argmin())
+        axL.scatter([grid[j]], [bal[j]], color=col, s=45, zorder=6, edgecolor="black", lw=0.6)
+        order = np.argsort(fpr)
+        _trap = getattr(np, "trapezoid", None) or np.trapz
+        auc = float(_trap(tpr[order], fpr[order]))
+        axR.plot(fpr, tpr, color=col, lw=2.2, marker=".", ms=3, label=f"{lbl} (AUC {auc:.2f})")
+        summary.append((lbl, float(bal[j]), float(grid[j]), auc))
+    axL.axhline(0.1, color="0.5", ls=":", lw=1.0)
+    axL.set_xlabel("threshold η"); axL.set_ylabel("error rate"); axL.set_ylim(-0.02, 1.02)
+    axL.set_title("Threshold dilemma: FPR (—) vs FNR (- -)\ndot = min max(FPR,FNR) = best achievable error")
+    axL.legend(fontsize=7, loc="upper center")
+    axR.plot([0, 1], [0, 1], color="0.6", ls=":", lw=1.0)
+    axR.set_xlabel("FPR (honest flagged)"); axR.set_ylabel("TPR (free-rider caught)")
+    axR.set_xlim(-0.02, 1.02); axR.set_ylim(-0.02, 1.02)
+    axR.set_title("ROC: free-rider detectability"); axR.legend(fontsize=8, loc="lower right")
+    finish(fig, a.out or "roc")
+    for lbl, bal, e, auc in summary:
+        print(f"  roc {lbl}: best balanced error {bal:.2f} at η={e:.3f} | AUC {auc:.2f}")
+
+
+def iso_compare(a):
+    """Side-by-side isolated same-class BER across settings (IID vs non-IID, ...).
+    Pairs honest_in[i] with fr_in[i] as panel i; shared --class. Each panel's η is
+    RECOMPUTED from that panel's honest clients (μ+3σ), so a stale baked-in η never
+    leaks in. Panel labels from --families (else the FR family name).  -> iso_compare_*."""
+    if not (getattr(a, "honest_in", None) and getattr(a, "fr_in", None)):
+        raise SystemExit("iso_compare needs --honest_in and --fr_in (paired, same length)")
+    hg, fg = a.honest_in, a.fr_in
+    n = min(len(hg), len(fg))
+    if n == 0:
+        raise SystemExit("iso_compare: no panels")
+    labels = a.families if (a.families and len(a.families) >= n) else [None] * n
+    tail = a.tail or TAIL
+    fig, axes = plt.subplots(1, n, figsize=(6.2 * n, 5.6), sharey=True, squeeze=False)
+    axes = axes[0]
+    for i in range(n):
+        ax = axes[i]
+        hruns, fruns = load([hg[i]]), load([fg[i]])
+        if not hruns or not fruns:
+            ax.set_title("(no data)"); continue
+        _, _, fr_info = _iso_series(fruns[0])
+        target = a.cls if a.cls is not None else next(
+            (int(d["tc"]) for _, d in sorted(fr_info.items()) if d["fr"] and d["tc"] is not None), None)
+        # recalibrate eta per panel from THIS setting's honest clients
+        eta_l = mu3s(converged_perclient(hruns, tail=tail, free_rider=False)) or ETA_LOOSE_DEFAULT
+        means = [np.mean(v) for v in honest_ber_by_round(hruns).values() if v]
+        eta_t = mu3s(means) or ETA_TIGHT_DEFAULT
+        _, h_hon = _iso_collect(hruns, target); f_fr, _ = _iso_collect(fruns, target)
+        warmup = a.warmup if a.warmup is not None else cfg(fruns[0], "autop_honest_until")
+        if warmup:
+            ax.axvline(warmup - 0.5, color="0.4", ls="--", lw=1.0)
+        ax.axhline(eta_t, color="black", ls="--", lw=1.6)
+        ax.axhline(eta_l, color="#3B6FB5", ls=(0, (5, 2)), lw=1.5)
+        for cid, (rr, mean, std) in sorted(h_hon.items()):
+            ax.plot(rr, mean, color=C_HONEST, lw=2.4, zorder=5, label=f"honest cls{target}")
+            if len(hruns) > 1: ax.fill_between(rr, mean - std, mean + std, color=C_HONEST, alpha=.18)
+        for cid, (rr, mean, std) in sorted(f_fr.items()):
+            ax.plot(rr, mean, color=C_FR, lw=2.6, marker="v", ms=4, zorder=5, label=f"FR cls{target}")
+            if len(fruns) > 1: ax.fill_between(rr, mean - std, mean + std, color=C_FR, alpha=.18)
+        lab = labels[i] or (fam(fruns[0]) or f"panel{i}")
+        ax.set_title(f"{lab}\ncls {target} · ηt={eta_t:.2f} ηl={eta_l:.2f}", fontsize=9)
+        ax.set_xlabel(LBL_ROUND)
+        if i == 0:
+            ax.set_ylabel(LBL_BER); ax.legend(fontsize=8, loc="upper right")
+    fig.suptitle(f"{TITLE_ISO} · class {a.cls if a.cls is not None else '?'} · side by side", fontsize=11)
+    finish(fig, a.out or f"iso_compare_c{a.cls}")
+
+
+def starvation(a):
+    """FR embedding health across settings: trigger images the FR actually holds
+    (n_trigger_train) and its converged BER, red-flagged when starved (n=0, no probe,
+    or BER≥STARVE_BER). Explains WHEN the attack breaks under non-IID.  -> starvation_*."""
+    tail = a.tail or TAIL
+    fams = _families_of(a); runs_all = load(a.inp); rows = []
+    for f in fams:
+        runs = pick(runs_all, f) if f else runs_all
+        if not runs:
+            continue
+        fr_cids, tclass, _, _ = _submarine(runs)
+        for cid in fr_cids:
+            ntrig, probe_ok = None, False
+            for r in runs:
+                c = ((r.get("compute", {}) or {}).get("per_client", {}) or {}).get(str(cid), {})
+                for t in (c.get("trace") or []):
+                    if t.get("n_trigger_train") is not None and ntrig is None:
+                        ntrig = int(t["n_trigger_train"])
+                    if t.get("ber_before") is not None:
+                        probe_ok = True
+            sber = [p["ber"] for r in runs for h in r.get("history", [])[-tail:]
+                    for p in (h.get("wm_per_client") or [])
+                    if p.get("is_free_rider") and int(p["cid"]) == cid and p.get("ber") is not None]
+            tb = float(np.mean(sber)) if sber else float("nan")
+            starved = (ntrig == 0) or (not probe_ok) or (tb >= STARVE_BER)
+            rows.append(((f or "runs").split("_rep")[0], cid, tclass.get(cid),
+                         ntrig if ntrig is not None else 0, tb, starved))
+    if not rows:
+        print("starvation: no FR rows"); return
+    labels = [f"{lab}\ncid{cid}(c{cls})" for lab, cid, cls, _, _, _ in rows]
+    x = np.arange(len(rows)); cols = [C_BAD if r[5] else C_GOOD for r in rows]
+    fig, (axT, axB) = plt.subplots(2, 1, figsize=(max(8, 1.15 * len(rows)), 7), sharex=True)
+    axT.bar(x, [r[3] for r in rows], color=cols, edgecolor="black", lw=0.5)
+    axT.set_ylabel("trigger imgs held\n(n_trigger_train)")
+    axT.set_title(f"Free-rider embedding health — red = starved (n=0 / no probe / BER≥{STARVE_BER})")
+    axB.bar(x, [r[4] for r in rows], color=cols, edgecolor="black", lw=0.5)
+    axB.axhline(STARVE_BER, color="0.4", ls=":", lw=1.2, label=f"starvation BER {STARVE_BER}")
+    axB.axhline(0.5, color=C_FR, ls="--", lw=1.0, label="random (0.5)")
+    axB.set_ylabel("converged FR BER"); axB.set_ylim(0, 0.62); axB.legend(fontsize=8)
+    axB.set_xticks(x); axB.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    finish(fig, a.out or "starvation")
+    for r in rows:
+        print(f"  {r[0]} cid{r[1]}(c{r[2]}): n_trig={r[3]} tailBER={r[4]:.3f} {'STARVED' if r[5] else 'ok'}")
+
+
+def savings_vs_alpha(a):
+    """Compute saved (1 - FR/honest cumulative samples) and tap-fraction per free-rider
+    across settings (families). Shows the ~70% floor holds and that coasting collapses
+    (tap-fraction -> 100%) on hard / non-IID classes.  -> savings_vs_alpha_*."""
+    fams = _families_of(a); runs_all = load(a.inp); rows = []
+    for f in fams:
+        runs = pick(runs_all, f) if f else runs_all
+        if not runs:
+            continue
+        fr = _fr_cids(runs)
+        all_cids = sorted({int(k) for r in runs
+                           for k in ((r.get("compute", {}) or {}).get("per_client", {}) or {})})
+        honest = [c for c in all_cids if c not in fr]
+        if not fr or not honest:
+            continue
+
+        def cum(cids):
+            acc = []
+            for r in runs:
+                for cid in cids:
+                    cb = _cumulative_by_round(r, cid, "samples")
+                    if cb:
+                        acc.append(max(cb.values()))
+            return float(np.mean(acc)) if acc else float("nan")
+        hon_tot = cum(honest)
+        _, tclass, data, _ = _submarine(runs)
+        for cid in fr:
+            fr_tot = cum([cid])
+            sav = 1 - fr_tot / hon_tot if hon_tot else float("nan")
+            tapf = _tap_fraction(data[cid]["seeds"]) if cid in data else float("nan")
+            rows.append(((f or "runs").split("_rep")[0], cid, tclass.get(cid), sav, tapf))
+    if not rows:
+        print("savings_vs_alpha: no rows"); return
+    labels = [f"{lab}\ncid{cid}(c{cls})" for lab, cid, cls, _, _ in rows]
+    x = np.arange(len(rows))
+    fig, (axS, axT) = plt.subplots(2, 1, figsize=(max(8, 1.15 * len(rows)), 7), sharex=True)
+    axS.bar(x, [100 * r[3] for r in rows], color=C_GOOD, edgecolor="black", lw=0.5)
+    axS.set_ylabel("compute saved (%)"); axS.set_ylim(0, 100)
+    axS.set_title("Free-rider savings and coasting across settings")
+    for xi, r in zip(x, rows):
+        if r[3] == r[3]:
+            axS.text(xi, 100 * r[3] + 1, f"{100*r[3]:.0f}%", ha="center", fontsize=8)
+    axT.bar(x, [100 * r[4] for r in rows], color=OKABE["orange"], edgecolor="black", lw=0.5)
+    axT.set_ylabel("tap-fraction (%)\n(100 = never coasts)"); axT.set_ylim(0, 105)
+    axT.set_xticks(x); axT.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
+    finish(fig, a.out or "savings_vs_alpha")
+    for r in rows:
+        print(f"  {r[0]} cid{r[1]}(c{r[2]}): saves {100*r[3]:.0f}%  tap {100*r[4]:.0f}%")
+
+
 CMDS = {
     "honest_lines": honest_lines,
     "honest_per_round": honest_per_round,
@@ -1561,6 +1971,11 @@ CMDS = {
     "pooled_band": pooled_band,
     "pooled_mean": pooled_mean,
     "honest_floors_all": honest_floors_all,
+    "overlap": overlap,
+    "roc": roc,
+    "iso_compare": iso_compare,
+    "starvation": starvation,
+    "savings_vs_alpha": savings_vs_alpha,
 }
 
 
@@ -1590,8 +2005,10 @@ def main():
         s.add_argument("--class", dest="cls", type=int, default=None, help="single trigger class (iso_*).")
         s.add_argument("--per_seed", action="store_true", help="faint per-seed lines (honest_lines).")
         s.add_argument("--warmup", type=int, default=None, help="free-riding start round (iso_pair marker).")
+        s.add_argument("--no_fr_indiv", action="store_true",
+                       help="timeline: hide the thin per-client FR lines (auto-on for H* families).")
     a = ap.parse_args()
-    if a.inp is None and a.cmd not in ("dirichlet_dist", "iso_pair", "iso_acc"):
+    if a.inp is None and a.cmd not in ("dirichlet_dist", "iso_pair", "iso_acc", "iso_compare"):
         ap.error(f"{a.cmd} needs --in")
     if a.out is None and a.inp:
         a.out = default_out(a.inp)

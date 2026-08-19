@@ -465,7 +465,7 @@ papers to read:
 - noise injection FR detection - [paper](https://ieeexplore.ieee.org/document/11623161) - not wm but interesting and related work
 
 - referenced in faremark as the box free wm: [Watermarking neural networks with watermarked images] and [Universal BlackMarks: Key-image-free blackbox multi-bit watermarking of deep neural networks] -> mention 26-27-28 not good for FL only centralized DL
-- RFFL [22]: contribution based mthof - rep for each client by examining contributions via uplaoded gradients using vector sim
+- RFFL [22]: contribution based method - rep for each client by examining contributions via uplaoded gradients using vector sim
 - DSGMF [23]: eval client contributions 
 - STD-deep autoencoding Gaussian mixture model (DAGMM) [21]: anomaly detectoion method that requires sufficient num of benign clients to pretrain autoencoder
 - FRAD [35]: contribution eval and reputation into anomaly detection mech - leveraging DAGMM

@@ -208,3 +208,295 @@ Short answer: **yes**, by the metric that matters — recalibrate the expectatio
 - **For the cleanest figure:** use K4 at 6 seeds with the combined-FR `timeline` view (seed-averaging fills in the tenths; two free-riders averaged smooth the teeth).
 
 **One thing to verify before quoting savings numbers:** confirm `tap_data_cpc=5` actually held in each K/J run (the config echo didn't surface it). If any run logged `tap_data_cpc=-1`, a tap trained on the full shard and its "% saved" is inflated — grep `result.json["config"]["tap_data_cpc"]` across the runs first.
+---
+---
+
+# Technical Appendix II — Model anatomy, the tap mechanism, and the new results
+
+> New consolidated section (added after the working notes above). It gathers every
+> mechanism explanation in one place: what the model *is*, what "freezing the head"
+> literally does, how the self-probe/threshold-estimation/tap-decision work, why graft
+> is optimal, and how to read the H / D / E / EA results. Where it refines an earlier
+> note (esp. Appendix B on `block2`), that is flagged **[refines B]**.
+
+## D. What a model *is*, and what "freezing the head" means (visual)
+
+### D.1 A model is an ordered list of tensors
+
+A **tensor** here is just one weight array with a name and a shape. ResNet‑18
+(torchvision, `num_classes=100`) is an ordered list of **62 such tensors**, holding
+**11,227,812 numbers** in total. `fc.weight` is one tensor of shape `(100, 512)` =
+51,200 numbers; `fc.bias` is `(100,)` = 100 numbers; `layer4.1.conv2.weight` is
+`(512,512,3,3)` = 2,359,296 numbers; and so on. (BatchNorm running mean/var are 60
+**buffers**, *not* parameters — they carry no gradient and are copied, never trained.)
+
+Think of the model as a stack you read **bottom → top**: raw pixels enter at the
+bottom, each tensor transforms the signal, and the top tensor (`fc`) emits the 100
+class logits that become the softmax the watermark is read from.
+
+```
+   INPUT image (3x32x32)
+        │
+        ▼
+ ┌───────────────────────────── BODY (feature extractor) ─────────────────────────────┐
+ │ idx  0  conv1.weight            (64,3,3,3)                                           │
+ │ idx  1  bn1.weight  … bn1.bias                                                       │
+ │ idx  … layer1.*  layer2.*  layer3.0.*  layer3.1.conv1/bn1   (generic edge/texture/  │
+ │ idx 41  layer3.1.bn1.bias                                    shape features)         │
+ └─────────────────────────────────────────────────────────────────────────────────────┘
+ ══════════════ cut = 62 − 20 = index 42 ══════════ ("block2" keeps the last 20 tensors)
+ ┌───────────────────────────── HEAD (what block2 taps) ──────────────────────────────┐
+ │ idx 42  layer3.1.conv2.weight   (256,256,3,3)                                        │
+ │ idx 45  layer4.0.conv1.weight   (512,256,3,3)   ← last residual STAGE (layer4)       │
+ │ idx …   layer4.0/1.* conv+bn+downsample                                              │
+ │ idx 60  fc.weight               (100,512)       ← THE CLASSIFIER                     │
+ │ idx 61  fc.bias                 (100,)          ← the watermark is decoded from here │
+ └─────────────────────────────────────────────────────────────────────────────────────┘
+        │
+        ▼
+   100 logits ──softmax──► P  ──smooth f()──► project by key M ──sign──► m watermark bits
+```
+
+The watermark **B** is decoded *only* from that final softmax **P** (Eq. 13/15). So the
+mark physically lives at the very top of the stack — in practice in `fc` (idx 60–61).
+
+### D.2 "Body" vs "head" vs the scope knobs
+
+| scope (`tap_scope`) | keeps trainable | tensors | scalars | % of weights |
+|---|---|---|---|---|
+| `head`  | `fc` only | last **2** | 51,300 | **0.46 %** |
+| `block` | `layer4.1` + `fc` | last **8** | ~7.1 M | ~63 % |
+| `block2`| `layer4` + tail of `layer3` + `fc` | last **20** | 9,035,364 | **80.5 %** |
+| `full`  | everything | all **62** | 11,227,812 | 100 % |
+
+**"Freezing the head/body" in code** = for each parameter tensor, set
+`requires_grad = (i >= cut)`. Everything before the cut (the body) gets
+`requires_grad=False`; everything from the cut up (the head) stays `True`.
+
+### D.3 What training actually changes
+
+One training step does three things, in order:
+
+```
+ 1. FORWARD   run the WHOLE stack (body+head) on the batch → logits → loss L = L_cl + λ·L_wm
+ 2. BACKWARD  autograd computes ∂L/∂θ, but ONLY for tensors with requires_grad=True,
+              and only propagates back far enough to reach them.
+ 3. STEP      optimizer does θ ← θ − lr·(∂L/∂θ) for tensors that received a gradient.
+              Frozen tensors got no gradient ⇒ they are untouched ⇒ they stay EXACTLY
+              at the global model's values.
+```
+
+So during a `block2` tap:
+
+```
+ body  (idx 0..41)  requires_grad=False   grad = None      θ unchanged (== global body)
+ ───── cut ─────────────────────────────────────────────────────────────────────────
+ head  (idx 42..61) requires_grad=True    grad computed    θ moves to re-lower BER
+```
+
+Two consequences worth stating in the paper:
+- The forward pass is still full (you pay one full forward), but the backward pass is
+  **truncated** at the cut — no gradients are computed for `layer1..layer3.1.conv1`.
+  That makes a `block2` tap cheaper in **gpu_ms** than a `full` tap, but *not* cheaper
+  in **samples** (see H below).
+- Because the body is left at the global values, a tapped model = *(current-ish body)*
+  + *(freshly re-embedded head)*. A **graft coast** takes this idea to the limit:
+  don't even tap — just staple your saved head onto a verbatim copy of the current
+  global body.
+
+### D.4 Graft, drawn
+
+```
+ GLOBAL model this round W_g          FR's SAVED watermarked head θ_H★  (from last tap)
+ ┌───────────── body θ_C^(t) ─────────────┐        ┌──── head (idx 42..61) ────┐
+ │ conv1 … layer3.1.bn1  (idx 0..41)       │        │ layer3.1.conv2 … fc.*      │
+ └─────────────────────────────────────────┘        └───────────────────────────┘
+              │  copy verbatim (free)                          │  keep frozen (free)
+              ▼                                                ▼
+ SUBMITTED coast model  =  [ body = W_g body ]  ++  [ head = (1−γ)·θ_H★ + γ·W_g head ]
+                            └ tracks the crowd ┘     └ carries the mark, γ=tap_graft_decay ┘
+```
+
+- γ = 0 → head is the frozen watermarked head verbatim.
+- small γ > 0 → head bleeds slightly toward the current global head each round so a
+  fully-frozen head doesn't desync from the slowly-moving body (this removes the
+  late-run BER spikes seen in single-seed J4/K7).
+
+## E. The self‑probe: the free‑rider running the server's verifier privately
+
+The free‑rider cannot see the server's BER. So it **replicates the verifier on its own
+held‑out trigger images**. During `_prepare` (once), it splits its shard:
+
+```
+ own shard ─▶  ├─ hold out up to H=16 trigger imgs  → PROBE SET Q   (never trained on)
+               ├─ keep ≥8 trigger imgs              → embedded on during taps
+               └─ d imgs per common class (cpc)     → reduced training loader  D̂
+```
+
+Its probe (`_probe_ber`) is line‑for‑line the server's check, only on Q instead of the
+server's test bank:
+
+```
+ probe_BER(W) = BER( sign(mean_over_Q( project( f(softmax(W(Q))), key M ) )),  target bits B )
+                └──────────────── identical to Eq. 15/16, same M, same B ──────────────┘
+```
+
+The **only** difference from the server is the *images*: Q comes from the attacker's
+**training** shard; the server extracts on **test** triggers. That train/test gap is the
+one quantity the attacker can't observe — and it is exactly what the safety **margin ρ**
+absorbs (D.4 / G).
+
+**Threshold self‑estimation.** During the last κ warm‑up rounds (the *calibration
+window*), it records its probe BER each round into a list **C**. Once, at defection, it
+freezes
+
+```
+ η̂  =  mean(C) + k·std(C)          # k = tap_eta_k = 3   → mirrors the server's μ+3σ rule
+ ρ  =  max(margin, ρ_k·std(C))      # "derived" margin: widens when its own estimate is noisy
+ τ  =  max(0, η̂ − ρ)                # the target BER it will steer to, kept safely below η
+```
+
+In the **oracle** ablation (J4/Y) it skips this and is *handed* the true η = 0.264 — an
+upper bound on the defender's advantage — and still evades. `η̂` (self) is the honest,
+no‑oracle version and is the flagship setting.
+
+## F. The tap/coast control law (one round)
+
+```
+ every free‑ride round:
+   M_coast ← CoastCandidate(W_g)                 # the model it WOULD submit if it coasts
+   b       ← probe_BER(M_coast)                  # a forward pass on Q only → 0 training samples
+   force   ← (coast_streak ≥ max_coast)          # safety: never coast forever
+   tap     ← (b is None) or (b > τ)  or force    # "threshold" mode
+   if tap:  freeze body(scope); honest‑wm update on D̂; unfreeze; save head; streak←0
+   else:    submit M_coast; streak←1
+```
+
+Coast while the *probed* coasting BER stays under target τ; surface for a cheap tap the
+moment it would drift above τ. Alternating produces the sawtooth ("submarine") BER.
+
+## G. Why graft is optimal — and why not the cheap alternatives
+
+The mark is an output‑space quantity, `head ∘ body`. Four "free" strategies exist; only
+graft satisfies **both** (a) preserve the key‑specific softmax pattern *and* (b) track the
+moving global body:
+
+| strategy | preserves mark? | tracks global body? | result |
+|---|---|---|---|
+| **Gaussian noise** `W_g+N(0,σ²)` (H6) | ✗ isotropic noise randomises `sign(z_k)` → E[BER]→0.5 | n/a | **caught** |
+| **Previous‑models** `2W_t−W_{t−1}` (H5) | ✗ global never trained on *this* key | n/a | **caught** |
+| **Decay** = replay own last full tap | ✓ | ✗ whole body frozen → goes stale, desyncs, accuracy drifts | worse than graft |
+| **Graft** = global body + frozen head | ✓ | ✓ | **evades, cheap** |
+
+Mathematically, why it is *cheap*: the detector reads `m = n//10 = 10` sign bits from the
+last‑layer softmax, so the watermark occupies a low‑dimensional readout. The gradient of
+`L_wm` that fixes those signs concentrates at the head; re‑establishing the mark needs
+`O(head)` work, while the honest client "wastes" `O(whole network)` work every round.
+Graft operationalises this: take the `O(whole network)` part for free from the global,
+pay only for the `O(head)` part, and pay even that only on the rare rounds the probe
+demands. Gaussian/prev‑model destroy the readout; decay keeps it but forfeits the free
+body improvement and drifts on any accuracy/anomaly axis.
+
+## H. **[refines B]** Where the compute saving actually comes from — and the "few parameters" wording
+
+A caution to bake into §2 and §6 so a reviewer can't turn it against us:
+
+- **`block2` is not "a small chunk of parameters."** By tensor *count* it is the last 20
+  of 62; by *weight* it is **80.5 %** of all scalars (the `layer4` convs are the widest in
+  the net). The genuinely tiny part — the true "few parameters" of the §2 intuition — is
+  the **output layer `fc`** (0.46 %), which is *where the mark is decoded*. State the
+  intuition as **"the mark is read from, and re‑embedded through, the output layer, a
+  <0.5 % slice"**, and treat `block2` as an *implementation scope for the tap*, not as the
+  evidence for "few parameters."
+- **The sample‑cost saving does not come from the parameter scope at all.** Per tap, the
+  cost metric (samples seen) is `|D̂|` regardless of whether the tap is `block2` or `full`
+  — both iterate the same reduced loader. The ~70 % sample saving comes from **(i) the
+  reduced shard** (≈27 % of honest data per tap, cf. D1 / E2) and **(ii) coasting**
+  (0‑sample rounds). Scope only affects **gpu_ms** (a `block2` backward is truncated) and,
+  indirectly, **how often it taps**: `full`‑scope taps perturb the body, desync the
+  self‑probe from the server BER, so the FR believes it must tap ~every round and stops
+  coasting (that is the K5 result — taps 95–100 %, saves *less*). So the honest one‑liner
+  is: **coasting + reduced shard buy the samples; localizing the tap to `block2` keeps the
+  probe aligned so it can keep coasting.**
+- **Why `block2` and not `head` (fc only)?** On hard classes, fc‑only re‑embedding is too
+  weak to pull BER back under τ, so it would tap every round or fail; `full` over‑perturbs
+  and desyncs. `block2` is the empirically found middle that re‑embeds strongly enough
+  while leaving the probe usable. This *is* the K4(block2) vs K5(full) ablation, and a
+  `head`‑scope run would complete the scope sweep on the cheap side.
+
+## I. Reading the H / D / E / EA results
+
+### I.1 H — positive controls (the detector is real)
+`H5_prevmodel_c100` and `H6_gaussian_c100`: the free‑rider mean BER sits at **≈0.50–0.58
+every round**, far above η_loose = 0.264, while honest sits at ≈0.05. So the detector
+**flags naive zero‑work free‑riders on every round** — exactly what a working defence
+should do. This is the control that makes the submarine's sub‑η evasion *mean* something:
+the detector is not broken; it is specifically the *output‑layer* structure the submarine
+exploits. Put H5/H6 in the paper immediately before the submarine result.
+
+### I.2 D — data‑budget sweep (the attack's data floor is tiny)
+`D1` sweeps common‑images‑per‑class ∈ {triggers‑only(0), +1, +2, +5, +10, full}:
+- **Triggers‑only collapses**: BER → ≈0.44 (no common data ⇒ the softmax collapses and the
+  mark can't be shaped) — *above* η_loose, i.e. this extreme is caught. You need *some*
+  common data.
+- **+1/class already passes**: converged BER ≈0.13, and **+2/+5/+10/full barely move it**
+  (≈0.11–0.14). The curve is a cliff at 0, then flat.
+
+Two paper points: (1) the marginal value of data above a tiny budget is ≈0, so the attack
+is cheap by construction; (2) it directly **justifies cpc=5** (safely past the cliff) and
+shows **cpc=10 (K7) buys essentially nothing over cpc=5 (K4)** — an argument *against*
+spending the extra data. (Note D1's η_tight is 0.084 for classes 6,8, vs 0.064 for 3,6 —
+another instance of class‑dependent thresholds.)
+
+### I.3 E / EA — non‑IID amplification (and the honest fix)
+- `E1` honest floors *balloon and spread* under Dirichlet α=0.5: **cls3 = 0.341**,
+  cls1 = 0.175, cls6 = 0.174 — vs cls3 = 0.045 in IID (A1). The single‑threshold problem
+  is far worse: no η separates honest‑hard from anything.
+- `E2` reduced FR (classes 3,6, 27 % data): FR mean BER ≈0.25 — **below its own hard‑class
+  honest floor (cls3 0.34)** and far below η_loose = 0.576. The attacker hides *inside* the
+  honest cloud. `E3` (α=0.1 and α=1.0) shows the same across the non‑IID spectrum, with
+  η_loose blowing up to 1.06 at α=0.1.
+- `EA1` distribution‑aware assignment is the **honest‑side mitigation**: give each client a
+  trigger class it actually holds, and most floors drop to **0.000** (a few remain, e.g.
+  cls63 0.20, cls73 0.25). Report this honestly: *part* of the non‑IID floor inflation is
+  an assignment artifact the defender can fix — **but** the fix repairs honest floors, it
+  does not detect the attacker, because the submarine exploits the head/body asymmetry
+  regardless of how trigger classes are assigned.
+
+**Gap this exposes:** E2/E3 are the *reduced* (tap‑every‑round) attack under non‑IID, not
+the adaptive submarine. The "non‑IID amplifies" story for *our* attack still needs at least
+one **`adaptive_tap` run under Dirichlet** (a K‑family config with `PARTITION=dirichlet`).
+Prioritise that over further IID tuning.
+
+## J. Is K8 the best submarine config to run?
+
+Short answer: **there is no single "best" config — K4 and K8 are two ends of a
+cost↔stealth frontier, and which is "best" depends on the claim you headline.** Run K8,
+but as a *complement* to K4, not a replacement.
+
+- **K4 (derived margin, self‑η, dynamic warm‑up, block2, cpc5, max_coast6)** — the
+  **flagship**. Its margin is *derived* (`ρ = max(0.03, σ_calib)`), so there is no
+  hand‑tuned constant: it is the "fully self‑estimating, no oracle, no magic number"
+  story, and it gives the best headline saving (≈70–76 %). Its weak spot: individual
+  seeds can nick above η on the easy class.
+- **K8 (fixed margin 0.12, block2, cpc5, max_coast8)** — the **stealth‑optimised** point.
+  The wide 0.12 margin keeps every seed comfortably under η (kills the over‑threshold
+  excursions visible in J4/K7), at the cost of a few more taps (slightly lower saving).
+  Its weak spot for the *narrative*: 0.12 is a **hand‑picked constant** a reviewer will
+  ask you to justify, which slightly undercuts the "fully dynamic/self‑estimating" pitch.
+
+Recommendation:
+1. Keep **K4 as the headline** (principled + best cost).
+2. Run **K8** and present it as *the margin knob trading cost for stealth* — this directly
+   answers "can you make it stealthier?" with "yes, one knob, here's the frontier."
+3. Above both in priority for a solid paper: **one non‑IID submarine run** (§I.3 gap) and
+   the **K5 full‑scope ablation** (§H). If compute is tight, do those before more IID
+   margin variants.
+4. Optional cheap add: a **`head`‑scope** run to complete the scope sweep on the small side.
+
+**Config‑correctness note (from the code):** with `tap_margin_mode="derived"` the effective
+margin is `max(tap_margin, margin_k·σ_calib)`, and with `warmup_mode="dynamic"` the calib
+window (and thus η̂) is resolved *after convergence*, in the κ rounds just before defection
+— so K4's η̂ and margin are both data‑driven, whereas K8 fixes the margin by hand. Say which
+you used in each figure caption; the two are different threat models (self‑calibrated vs
+partially hand‑tuned).

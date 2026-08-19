@@ -133,24 +133,74 @@ phase_plot(){
   run "$PL iso_pair    --honest_in '$RES/EA1_honest_niid_distrib_c100_rep*/result.json' --fr_in '$ALL' --family EA2_reduced_niid_distrib_c36 --class 6 --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/iso_EA2_c6"
   run "$PL gpu_savings --in '$ALL' --family EA2_reduced_niid_distrib_c36 --out $OUT/gpu_savings_EA2_reduced_niid_distrib_c36"
 
+  # ===== NON-IID SUBMARINE: full suite + timelines (same views as IID K group) =====
+  # E* = random trigger assignment (honest floor from E1) ; EA* = fair (honest floor from EA1)
+  NIID_SUB="E4_submarine_niid_c36 E4_submarine_niid_c17 E4_submarine_niid_c36_a01 E4_submarine_niid_c36_a10 EA3_submarine_niid_distrib_c36 EA3_submarine_niid_distrib_c17"
+  for fam in $NIID_SUB; do
+    case $fam in
+      EA*) HF=EA1_honest_niid_distrib_c100 ;;
+      *)   HF=E1_honest_niid_c100 ;;
+    esac
+    HG="$RES/${HF}_rep*/result.json"
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$HG' --honest_family $HF --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$HG' --honest_family $HF --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$HG' --honest_family $HF --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/tap_effort_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$HG' --honest_family $HF --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/timeline_${fam}"
+    run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$HG' --honest_family $HF --out $OUT/accuracy_${fam}"
+  done
+  # isolated same-class twin for the random-assign submarine (fixed classes 3,6 vs E1 honest)
+  for cls in 3 6; do
+    run "$PL iso_pair --honest_in '$RES/E1_honest_niid_c100_rep*/result.json' --fr_in '$RES/E4_submarine_niid_c36_rep*/result.json' --class $cls --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/iso_E4_c${cls}"
+  done
+
+  # ===== AMPLIFICATION PANEL: ROC + IID-vs-nonIID side-by-side + starvation + savings =====
+  # alpha axis: IID (K4) + non-IID random a=1.0/0.5/0.1 (+ fair EA3). One curve/bar per setting.
+  AMP_FAMS="K4_alldyn_block2_c36 E4_submarine_niid_c36_a10 E4_submarine_niid_c36 E4_submarine_niid_c36_a01 EA3_submarine_niid_distrib_c36"
+  # ROC / threshold-dilemma (honest pop = each family's own honest clients)
+  run "$PL roc --in '$ALL' --families $AMP_FAMS --tail 20 --out $OUT/roc_iid_vs_niid"
+  # IID vs non-IID(random) isolated same-class, side by side, at cls 3 and 6
+  for cls in 3 6; do
+    run "$PL iso_compare --class $cls \
+       --honest_in '$RES/${HON}_rep*/result.json' '$RES/E1_honest_niid_c100_rep*/result.json' \
+       --fr_in '$RES/K4_alldyn_block2_c36_rep*/result.json' '$RES/E4_submarine_niid_c36_rep*/result.json' \
+       --families 'IID' 'non-IID random' --out $OUT/iso_compare_c${cls}"
+  done
+  # starvation (embedding health) + savings/tap-fraction across the alpha sweep
+  run "$PL starvation       --in '$ALL' --families $AMP_FAMS --tail 20 --out $OUT/starvation_vs_alpha"
+  run "$PL savings_vs_alpha --in '$ALL' --families $AMP_FAMS --out $OUT/savings_vs_alpha"
+
   # ===================== GROUP K -- the submarine ===========================
-  # 3 views per free-rider (cid3 easy, cid6 hard) from the SAME data:
-  #   tap_perfr   = seed-band single graph (mean over seeds; majority tap/coast markers)
-  #   tap_perseed = one panel PER SEED (fixes the marker collisions across seeds)
-  #   tap_effort  = BER + cumulative SAMPLES side by side (stealth vs effort in one look)
-  for fam in K4_alldyn_block2_c36 K5_alldyn_full_c36; do
+  # all submarine families. c36 => free-riders on classes 3,6 ; c17 => classes 1,7.
+  #   tap_perfr = seed-band ; tap_perseed = per-seed panels ; tap_effort = BER+samples ;
+  #   accuracy = main-task ; gpu_savings/timeline = cost & mean. FR cids auto-detected.
+  K_C36="K4_alldyn_block2_c36 K5_alldyn_full_c36 K7_costopt_block2_cpc10_c36 K8_opt_block2_c36"
+  K_C17="K4_alldyn_block2_c17 K8_opt_block2_c17"
+  for fam in $K_C36 $K_C17; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
     run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"
     run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_effort_${fam}"
     run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --out $OUT/accuracy_${fam}"
     run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
-    run "$PL timeline --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/timeline_${fam}"
   done
-  # isolated same-class twin (from A1) for cid3 (easy) and cid6 (hard), K4 + K5
-  for cls in 3 6; do
-    run "$PL iso_pair --honest_in '$RES/${HON}_rep*/result.json' --fr_in '$RES/K4_alldyn_block2_c36_rep*/result.json' --class $cls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/iso_K4_c${cls}"
-    run "$PL iso_pair --honest_in '$RES/${HON}_rep*/result.json' --fr_in '$RES/K5_alldyn_full_c36_rep*/result.json' --class $cls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/iso_K5_c${cls}"
+  # isolated same-class twin (honest from A1): c36 families at cls 3,6 ; c17 families at cls 1,7
+  for fam in $K_C36; do
+    for cls in 3 6; do
+      run "$PL iso_pair --honest_in '$RES/${HON}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/iso_${fam}_c${cls}"
+    done
   done
+  for fam in $K_C17; do
+    for cls in 1 7; do
+      run "$PL iso_pair --honest_in '$RES/${HON}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  # honest per-class band vs ALL submarine operating points on one axis.
+  KFR=""
+  for fam in $K_C36 $K_C17 J4_scope_graft_block2_c36 J4_scope_graft_block2_c17; do
+    KFR="$KFR '$RES/${fam}_rep*/result.json'"
+  done
+  run "$PL overlap --in '$ALL' --families $ATFAMS --fr_in $KFR --eta_tight $ETA_T --eta_loose $ETA_L --tail 20 --out $OUT/overlap_band_vs_fr"
 
   # ===================== GROUP Z -- NO-WATERMARK control ====================
   # A0_nowm = all-honest, lambda=0 (embedding OFF) 
@@ -158,11 +208,13 @@ phase_plot(){
   run "$PL class_acc        --in '$ALL' --family A0_nowm_honest_c100 --out $OUT/A0_nowm_class_acc"
 
   # ===================== GROUP Y -- ORACLE-THRESHOLD ablation (J4) ==========
-  # J4 = the submarine handed the TRUE eta (0.264) instead of self-estimating it
+  # J4 = the submarine handed the TRUE eta (0.264) instead of self-estimating it.
+  # c36 => classes 3,6 ; c17 => classes 1,7. Distinct out-prefixes (no overwrite).
   for fam in J4_scope_graft_block2_c36 J4_scope_graft_block2_c17; do
-    run "$PL timeline   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
-    run "$PL tap_perfr  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
-    run "$PL tap_effort --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_${fam}"
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_effort_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/timeline_${fam}"
   done
 
   echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control)"

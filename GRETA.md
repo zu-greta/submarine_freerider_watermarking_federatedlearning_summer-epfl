@@ -442,7 +442,7 @@ TODO:
 3. create meeting summary notes for tuesday meeting 
 4. what to do next (finalize experiments and setup - figure out direction for finshing up and timeline)
 
-#### August 4
+#### August4
 RESULTS
 - REDUCED ATTACK (group D)
     - [D1_spectrum.png](results/groups/figs_1/D1_spectrum.png)
@@ -541,7 +541,7 @@ TODO:
 - summary of what to do next
 - other ideas to explore: collution, reputation, more clients than classes etc. also related papers to read
 
-August 11
+#### August11
 - TODO general context - present every result so far, all the setup and findings -> to be layed out for a paper
 - TODO summary of results for the attack, polished and ready for paper
 - TODO cleanup codebase and results - keep only relevant results and plots for the paper
@@ -592,14 +592,77 @@ TODO
         - finish running baselines - A and T -> check that baseline watermark accuracy matches the paper's for sanity check
             - [x] prob: instead agg A and T1-T2 to check and run T4-7 if needed later
             - todo T4-T10
-        - start running submarines
-            - todo D and K 
-            - Y to double check (J)
+        - run submarines
+            - todo D 
+            - running K (if it works) - check K8 and K4
+            - [x] Y to double check (J) - check results
         - run the remaining experiments
             - [x] H Z 
             - todo E/EA (all non-iid)
     - write paper based on storyline - add results
     - finish running all experiments and collect results and plot
+- aug17 - meeting prep
+    - put together list of papers with what useful information they have for the paper (esp for the algo)
+    - put toghether paper draft sections, storyline and results summary + questions for the meeting
+    - collect all results so far with submarine explanation for the meeting
+    - finish aug14 tasks
+
+#### August18
+- QUESTIONS - DRAFT
+    - ...
+    - research questions to define for the intro -> like the experimental eval section V in the satml paper ref? should i do a similar structure for the intro or for the eval?
+    - skip FL/fedavg definitions?
+    - is there appendix out of page limit?
+    - plot insertion in overleaf ? anything about the plots - format etc ?
+        - R or PGF - scales (raw data in overleaf)
+- REFERENCE PAPERS
+    - ...
+    - diction: breakdown of the blax box and white box watermarking methods and previous work done
+    - waffle - FL context
+    - fedipr (jade mentionned the algo 3)
+    - universal blackmarks: https://ieeexplore.ieee.org/document/10025674 output layer watermarking. very similar concept but not in fl setting just dnn
+    - fednifw: https://ieeexplore.ieee.org/document/10944964 (non conflicting wm in fl)
+    - lin et al. first FR in FL: https://arxiv.org/pdf/1911.12560 +advanced FR: https://neurips.cc/virtual/2021/35179
+    - fraboni et al. gaussian noise: https://arxiv.org/abs/2006.11901
+
+    - RFFL [22]: contribution based method - rep for each client by examining contributions via uplaoded gradients using vector sim
+    - DSGMF [23]: eval client contributions 
+    - STD-deep autoencoding Gaussian mixture model (DAGMM) [21]: anomaly detectoion method that requires sufficient num of benign clients to pretrain autoencoder
+    - FRAD [35]: contribution eval and reputation into anomaly detection mech - leveraging DAGMM
+- EXP PROGRESS
+    - ...
+    - mechanism for grafting: grafting the head of the previous model with the body of the global model - better than resending the previous watermarking method - taps less. [graft_fig_K4](results/done_runs/figs/timeline_K4_alldyn_block2_c36.png). for oracle threshold: [J4_easy](results/done_runs/figs/timeline_J4_scope_graft_block2_c17.png) and [J4_hard](results/done_runs/figs/timeline_J4_scope_graft_block2_c36.png)
+    - with the cost plot: [graft_fig_K4_cost_cid3](results/done_runs/figs/tap_effort_K4_alldyn_block2_c36_K4_alldyn_block2_c36_cid3_effort.png) and [graft_fig_K4_cost_cid6](results/done_runs/figs/tap_effort_K4_alldyn_block2_c36_K4_alldyn_block2_c36_cid6_effort.png)
+
+
+- meeting notes
+    - ...
+
+TODO
+- prep for tomorrow (and friday) meeting
+    - have general notes and storyline highlighted for the meeting + a few key plots to show results and the attack
+- write paper draft 
+- add in the raw data for the plots in overleaf
+
+- collect and read output layer watermarking papers and related works 
+- run experiments
+    - finish running baselines - A and T -> check that baseline watermark accuracy matches the paper's for sanity check
+        - [x] prob: instead agg A and T1-T2 to check and run T4-7 if needed later
+        - todo T4-T10
+    - run submarines
+        - todo D 
+        - running K (if it works) - check K8 and K4
+        - [x] Y to double check (J) - check results
+    - run the remaining experiments
+        - [x] H Z 
+        - todo E/EA (all non-iid)
+- write paper based on storyline - add results
+- finish running all experiments and collect results and plot
+
+
+- training on just the last two layers (softmax and the layer before) -> block2?
+- grafting
+-> reduced training + grafting just the block2 that you train on -> do this for entire, no sub
 
 ---
 

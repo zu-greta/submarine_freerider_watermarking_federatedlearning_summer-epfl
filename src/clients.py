@@ -4,13 +4,15 @@ SECTION 1  HONEST      Client, _to_cpu_state
 SECTION 2  WATERMARK   WatermarkClient (Eq.11-12 + Eq.14 memory)
                         build_watermarked_clients      
 SECTION 3  ATTACKERS   _SimpleFRMixin, make_reduced_attack,
-                        make_adaptive_tap_attack (submarine)
+                        make_adaptive_tap_attack (submarine),
+                        make_graftblock_attack (TODO)
 
 
 Client                          honest FedAvg: load global -> local SGD -> return
     +-- WatermarkClient         ... + L_wm on trigger-class samples + Eq.14 memory update
     +-- ReducedFreeRider        ... but trains on a reduced shard after round W
     +-- AdaptiveTapFreeRider    ... the submarine: estimates eta, warmup rounds, coast/tap
+    +-- GraftBlockFreeRider     ... TODO: graft last layers onto global model after reduced training on last layers only
 """
 
 from __future__ import annotations
@@ -381,6 +383,10 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     honest_min=getattr(cfg, "tap_honest_min", 6),
                     warmup_cap=getattr(cfg, "tap_warmup_cap", 15),
                     **wm_args, **common))
+            # graftblock attack
+            elif attack == "graftblock":
+                # TODO
+                cls = make_graftblock_attack(WatermarkClient)
             elif attack in ATTACKS:
                 # paper baselines (previous_models / gaussian) - no embedding
                 cls = ATTACKS[attack]
@@ -986,3 +992,19 @@ def make_adaptive_tap_attack(base_cls):
 #                                honest_min, warmup_cap
 #   * uncertainty-scaled margin  margin_mode="derived", margin_k
 #   * coast without a replay ... coast_mode="graft" (+ scope) 
+
+
+# ------------------------------------------------------------------------------ #
+#  Block grafting Attack:                         
+#  honest, 
+#  then train (reduced) with last layers (softmax and layer before) 
+#  and graft that watermark onto the global model              
+# ------------------------------------------------------------------------------ #
+# TODO: graftblock attack: 
+# same warmup, no estimating treshold or anything, 
+# just reduced data amount (cpc=5)
+# + scope at last 2 blocks (last 2 layers: softmax and layer before) 
+# + grafting just the last two layers onto the global model received
+def make_graftblock_attack(base_cls):
+    # TODO
+    return make_adaptive_tap_attack(base_cls) # placeholder for now

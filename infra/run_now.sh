@@ -158,6 +158,45 @@ if has E; then
           FAMILY="E3_reduced_niid_c36_${ATAG}" NOTE="E3 non-iid reduced hard alpha=$A" ./submit_experiment.sh 14 "$s"
     done
   done
+  # submarine attack on E non-iid
+  for s in $SEEDS_E; do
+    env ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 PARTITION=dirichlet DIRICHLET_ALPHA=0.5 \
+        AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 AUTOP_ORACLE_ETA=0.264 \
+        WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_COAST_MODE=graft TAP_WHEN=threshold \
+        TAP_PROBE_HOLDOUT=16 TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2 \
+        FAMILY="E4_submarine_niid_c36" \
+        NOTE="E4 hard non-iid submarine (self-eta, derived margin, dynamic warmup) on distribution-aware assignment" ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_E; do
+    env ATTACK=adaptive_tap FREE_RIDER_IDS=1,7 PARTITION=dirichlet DIRICHLET_ALPHA=0.5 \
+        AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 AUTOP_ORACLE_ETA=0.264 \
+        WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_COAST_MODE=graft TAP_WHEN=threshold \
+        TAP_PROBE_HOLDOUT=16 TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2 \
+        FAMILY="E4_submarine_niid_c17" \
+        NOTE="E4 easy non-iid submarine (self-eta, derived margin, dynamic warmup) on distribution-aware assignment" ./submit_experiment.sh 14 "$s"
+  done
+  # --- submarine non-iid ALPHA SWEEP (hard c36): gives the amplification plots an alpha axis ---
+  # (a=0.5 is E4_submarine_niid_c36 above; add the extremes a=0.1 and a=1.0)
+  for A in 0.1 1.0; do
+    ATAG=$(echo "a$A" | tr -d '.')
+    for s in $SEEDS_E; do
+      env ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 PARTITION=dirichlet DIRICHLET_ALPHA=$A \
+          AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 AUTOP_ORACLE_ETA=0.264 \
+          WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_COAST_MODE=graft TAP_WHEN=threshold \
+          TAP_PROBE_HOLDOUT=16 TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+          TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2 \
+          FAMILY="E4_submarine_niid_c36_${ATAG}" \
+          NOTE="E4 hard non-iid submarine alpha=$A (amplification sweep)" ./submit_experiment.sh 14 "$s"
+    done
+  done
 fi
 
 # ---------------------------------------------------------------------------
@@ -180,7 +219,33 @@ if has EA; then
         FAMILY="EA2_reduced_niid_distrib_c36" \
         NOTE="EA2 non-iid reduced a=0.5, DISTRIBUTION assignment for all incl. free-riders" ./submit_experiment.sh 14 "$s"
   done
+  # submarine attack on EA distribution aware non-iid
+  for s in $SEEDS_EA; do
+    env ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 PARTITION=dirichlet DIRICHLET_ALPHA=0.5 \
+        WM_TRIGGER_ASSIGN=distribution \
+        AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 AUTOP_ORACLE_ETA=0.264 \
+        WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_COAST_MODE=graft TAP_WHEN=threshold \
+        TAP_PROBE_HOLDOUT=16 TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2 \
+        FAMILY="EA3_submarine_niid_distrib_c36" \
+        NOTE="EA3 hard non-iid submarine (self-eta, derived margin, dynamic warmup) on distribution-aware assignment" ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_EA; do
+    env ATTACK=adaptive_tap FREE_RIDER_IDS=1,7 PARTITION=dirichlet DIRICHLET_ALPHA=0.5 \
+        WM_TRIGGER_ASSIGN=distribution \
+        AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 AUTOP_ORACLE_ETA=0.264 \
+        WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_COAST_MODE=graft TAP_WHEN=threshold \
+        TAP_PROBE_HOLDOUT=16 TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2 \
+        FAMILY="EA3_submarine_niid_distrib_c17" \
+        NOTE="EA3 easy non-iid submarine (self-eta, derived margin, dynamic warmup) on distribution-aware assignment" ./submit_experiment.sh 14 "$s"
+  done
 fi
+
 
 # ---------------------------------------------------------------------------
 # GROUP H -- H5 base previous-models free-rider on c100 (positive control).
@@ -200,11 +265,13 @@ if has H; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP K -- THE SUBMARINE (self-estimated eta, derived margin, dynamic warmup).
+# GROUP K -- SUBMARINE (self-estimated eta, derived margin, dynamic warmup).
 #   K4 = block2 scope (headline, 3 seeds). K5 = full scope (ablation, 3 seeds).
 # ---------------------------------------------------------------------------
 if has K; then
   SEEDS_K="${SEEDS_K:-0 1 2}"
+
+  # kbase = ALL-DYNAMIC (self-eta, derived margin, dynamic warmup).
   kbase="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 \
          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
@@ -213,47 +280,75 @@ if has K; then
          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
 
-  # K4 -- block2 scope 
+  # K4 -- block2 scope, hard/medium classes 3,6 (headline all-dynamic)
   for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=block2 \
-        FAMILY="K4_alldyn_block2_c36" \
-        NOTE="K4 hard classes all-dynamic + block2 sawtooth (self-eta, derived margin, dynamic warmup)" \
+    env $kbase TAP_SCOPE=block2 FAMILY="K4_alldyn_block2_c36" \
+        NOTE="K4 hard classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
+  # K4 -- block2 scope, EASY classes 1,7  (corrected: free_rider_ids=1,7)
   for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=block2 \
-        FAMILY="K4_alldyn_block2_c17" \
-        NOTE="K4 easy classes all-dynamic + block2 sawtooth (self-eta, derived margin, dynamic warmup)" \
+    env $kbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 FAMILY="K4_alldyn_block2_c17" \
+        NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K6 -- tweaked block2 submarine - max coast longer, graft decay slower, margin fixed (ablation vs K4)
-  k6base="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
-         AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 \
+  # K5 -- full scope (scope ablation vs K4/block2), classes 3,6
+  for s in $SEEDS_K; do
+    env $kbase TAP_SCOPE=full FAMILY="K5_alldyn_full_c36" \
+        NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+
+  # kfix = FIXED-margin cost-optimised base (self-eta, FIXED margin, dynamic warmup, block2).
+  #   K7 and K8 differ only in margin / max_coast / cpc (set per-run below).
+  kfix="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+         AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 \
          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
-         TAP_MARGIN=0.03 TAP_MARGIN_MODE=fixed TAP_MAX_COAST=12 TAP_GRAFT_DECAY=0.10 \
-         ROUNDS=50 FAST_DATA=1 TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
+         TAP_GRAFT_DECAY=0.10 TAP_MARGIN_MODE=fixed ROUNDS=50 FAST_DATA=1 \
+         TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2"
+
+  # K7 -- hard-class data bump: fixed margin 0.03, longer coast (12), cpc 10, classes 3,6
   for s in $SEEDS_K; do
-    env $k6base FREE_RIDER_IDS=1,7 \
-        FAMILY="K6_costopt_block2_c36" \
-        NOTE="K6 cost-optimised block2 (max_coast12, graft_decay0.10, fixed margin) -- fewer taps than K4" \
+    env $kfix TAP_MARGIN=0.03 TAP_MAX_COAST=12 TAP_DATA_CPC=10 \
+        FAMILY="K7_costopt_block2_cpc10_c36" \
+        NOTE="K7 fixed-margin block2, cpc=10 (more embed signal on the hard class)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K7 -- hard-class data bump: same as K6 but cpc 5->10 to pull cls6 BER toward the honest floor
+  # K8 -- margin optimized submarine: fixed margin 0.12 (stops over-threshold spikes), coast 8, cpc 5.
   for s in $SEEDS_K; do
-    env $k6base TAP_DATA_CPC=10 FAMILY="K7_costopt_block2_cpc10_c36" \
-        NOTE="K7 = K6 with TAP_DATA_CPC=10 (more embed signal on the hard class)" \
+    env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 \
+        FAMILY="K8_opt_block2_c36" \
+        NOTE="K8 optimised block2 (fixed margin 0.12) -- hard classes 3,6" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K5 -- full scope (skip)
-  # for s in $SEEDS_K; do
-  #   env $kbase TAP_SCOPE=full \
-  #       FAMILY="K5_alldyn_full_c36" \
-  #       NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
-  #       ./submit_experiment.sh 14 "$s"
-  # done
+  for s in $SEEDS_K; do
+    env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 FREE_RIDER_IDS=1,7 \
+        FAMILY="K8_opt_block2_c17" \
+        NOTE="K8 optimised block2 (fixed margin 0.12) -- easy classes 1,7" \
+        ./submit_experiment.sh 14 "$s"
+  done
 fi
+
+# ---------------------------------------------------------------------------
+# GROUP L -- GRAFTBLOCK attack - TODO
+# reduced data, training only block2, grafting the trained block2 onto the global model
+# ---------------------------------------------------------------------------
+if has L; then
+  SEEDS_L="${SEEDS_L:-0 1 2}"
+  for s in $SEEDS_L; do
+    env ATTACK=graftblock FREE_RIDER_IDS=3,6 AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 \
+        AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
+        FAMILY="L1_graftblock_c100_c36" NOTE="L1 graftblock attack on hard classes 3,6" ./submit_experiment.sh 14 "$s"
+  done
+  for s in $SEEDS_L; do
+    env ATTACK=graftblock FREE_RIDER_IDS=1,7 AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 \
+        AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
+        FAMILY="L2_graftblock_c100_c17" NOTE="L2 graftblock attack on easy classes 1,7" ./submit_experiment.sh 14 "$s"
+  done
+fi
+
 
 # ---------------------------------------------------------------------------
 # GROUP Z -- NO-WATERMARK sanity check (trigger class accuracy) 
