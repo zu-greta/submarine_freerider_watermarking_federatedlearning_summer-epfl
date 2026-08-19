@@ -123,7 +123,7 @@ def parse_args():
     p.add_argument("--tap_period", type=int, default=None)
     p.add_argument("--tap_max_coast", type=int, default=None)
     p.add_argument("--tap_data_cpc", type=int, default=None)
-    p.add_argument("--tap_scope", type=str, default=None, choices=["full", "block2", "block", "head"])
+    p.add_argument("--tap_scope", type=str, default=None, choices=["full", "block2", "block", "head2", "head"])
     p.add_argument("--tap_coast_mode", type=str, default=None, choices=["decay", "graft"])
     p.add_argument("--tap_graft_decay", type=float, default=None)
     p.add_argument("--tap_probe_holdout", type=int, default=None)

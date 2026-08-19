@@ -217,6 +217,25 @@ phase_plot(){
     run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/timeline_${fam}"
   done
 
+  # ===================== GROUP L -- block-graft free-rider =================
+  # reduced + last-layers-only (+ optional graft)
+  #   head2  scope = softmax fc + the conv layer just before it (last 5 tensors)
+  #   block2 scope = last 20 tensors 
+  L_FAMS="L1_graftblock_head2_c36 L2_graftblock_block2_c36 L3_graftblock_head2_graft_c36 L4_graftblock_block2_graft_c36"
+  for fam in $L_FAMS; do
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_effort_${fam}"
+    run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --out $OUT/accuracy_${fam}"
+    run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/timeline_${fam}"
+    for cls in 3 6; do
+      run "$PL iso_pair --honest_in '$RES/${HON}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  # scope x graft ablation on one axis (savings + tap-fraction across the 4 L variants)
+  run "$PL savings_vs_alpha --in '$ALL' --families $L_FAMS --out $OUT/savings_graftblock"
+
   echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control)"
 }
 

@@ -271,7 +271,7 @@ fi
 if has K; then
   SEEDS_K="${SEEDS_K:-0 1 2}"
 
-  # kbase = ALL-DYNAMIC (self-eta, derived margin, dynamic warmup).
+  # kbase = ALL-DYNAMIC (self-eta, DERIVED margin, dynamic warmup). Headline K4 + ablation K5.
   kbase="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 \
          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
@@ -332,25 +332,6 @@ if has K; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP L -- GRAFTBLOCK attack - TODO
-# reduced data, training only block2, grafting the trained block2 onto the global model
-# ---------------------------------------------------------------------------
-if has L; then
-  SEEDS_L="${SEEDS_L:-0 1 2}"
-  for s in $SEEDS_L; do
-    env ATTACK=graftblock FREE_RIDER_IDS=3,6 AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 \
-        AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
-        FAMILY="L1_graftblock_c100_c36" NOTE="L1 graftblock attack on hard classes 3,6" ./submit_experiment.sh 14 "$s"
-  done
-  for s in $SEEDS_L; do
-    env ATTACK=graftblock FREE_RIDER_IDS=1,7 AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 \
-        AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
-        FAMILY="L2_graftblock_c100_c17" NOTE="L2 graftblock attack on easy classes 1,7" ./submit_experiment.sh 14 "$s"
-  done
-fi
-
-
-# ---------------------------------------------------------------------------
 # GROUP Z -- NO-WATERMARK sanity check (trigger class accuracy) 
 #   All-honest run with the watermark embedding disabled (WM_LAMBDA=0) 
 # ---------------------------------------------------------------------------
@@ -387,6 +368,43 @@ if has Y; then
     env $jbase FREE_RIDER_IDS=1,7 \
         FAMILY="J4_scope_graft_block2_c17" \
         NOTE="J4 oracle-eta block2+graft submarine, classes 1,7 (single seed)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+fi
+
+if has L; then
+  # ---------------------------------------------------------------------------
+  # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock").
+  #   Warm up honest, then every free-ride round train only the last layers on a
+  #   reduced shard (cpc=5); optionally graft that trained scope onto the current
+  #   global model each round (body then follows the global exactly)
+  #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
+  #     block2 = last 20 tensors
+  # ---------------------------------------------------------------------------
+  SEEDS_L="${SEEDS_L:-1000}"                        # single seed each
+  lbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
+         AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+         WM_ETA_FIXED=0.064 FREE_RIDER_IDS=3,6"
+  for s in $SEEDS_L; do
+    # L1 -- head2 scope (softmax + previous layer), no graft
+    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=decay \
+        FAMILY="L1_graftblock_head2_c36" \
+        NOTE="L1 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 3,6)" \
+        ./submit_experiment.sh 14 "$s"
+    # L2 -- block2 scope, no graft
+    env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=decay \
+        FAMILY="L2_graftblock_block2_c36" \
+        NOTE="L2 graftblock reduced cpc5 + block2 no graft (classes 3,6)" \
+        ./submit_experiment.sh 14 "$s"
+    # L3 -- head2 scope + graft trained scope onto global each round
+    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=graft \
+        FAMILY="L3_graftblock_head2_graft_c36" \
+        NOTE="L3 graftblock reduced cpc5 + head2 + graft onto global each round (classes 3,6)" \
+        ./submit_experiment.sh 14 "$s"
+    # L4 -- block2 scope + graft trained scope onto global each round
+    env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=graft \
+        FAMILY="L4_graftblock_block2_graft_c36" \
+        NOTE="L4 graftblock reduced cpc5 + block2 + graft onto global each round (classes 3,6)" \
         ./submit_experiment.sh 14 "$s"
   done
 fi

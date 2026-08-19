@@ -5,14 +5,14 @@ SECTION 2  WATERMARK   WatermarkClient (Eq.11-12 + Eq.14 memory)
                         build_watermarked_clients      
 SECTION 3  ATTACKERS   _SimpleFRMixin, make_reduced_attack,
                         make_adaptive_tap_attack (submarine),
-                        make_graftblock_attack (TODO)
+                        make_graftblock_attack (last-layers-only + optional graft)
 
 
 Client                          honest FedAvg: load global -> local SGD -> return
     +-- WatermarkClient         ... + L_wm on trigger-class samples + Eq.14 memory update
     +-- ReducedFreeRider        ... but trains on a reduced shard after round W
     +-- AdaptiveTapFreeRider    ... the submarine: estimates eta, warmup rounds, coast/tap
-    +-- GraftBlockFreeRider     ... TODO: graft last layers onto global model after reduced training on last layers only
+    +-- GraftBlockFreeRider     ... graft last layers onto global model after reduced training on last layers only
 """
 
 from __future__ import annotations
@@ -383,10 +383,18 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     honest_min=getattr(cfg, "tap_honest_min", 6),
                     warmup_cap=getattr(cfg, "tap_warmup_cap", 15),
                     **wm_args, **common))
-            # graftblock attack
+            # graftblock attack (group L): reduced + scope-limited (+ optional graft)
             elif attack == "graftblock":
-                # TODO
                 cls = make_graftblock_attack(WatermarkClient)
+                clients.append(cls(
+                    common_per_class=int(getattr(cfg, "autop_common_per_class", 5)),
+                    honest_rounds=getattr(cfg, "autop_honest_until", 12),
+                    calib_rounds=getattr(cfg, "autop_calib_rounds", 4),
+                    scope=(getattr(cfg, "tap_scope", "head2") or "head2"),
+                    graft=(str(getattr(cfg, "tap_coast_mode", "")) == "graft"),
+                    n_common_classes=int(getattr(cfg, "autop_n_common_classes", -1)),
+                    trigger_train_n=int(getattr(cfg, "autop_trigger_train_n", -1)),
+                    **wm_args, **common))
             elif attack in ATTACKS:
                 # paper baselines (previous_models / gaussian) - no embedding
                 cls = ATTACKS[attack]
@@ -995,16 +1003,97 @@ def make_adaptive_tap_attack(base_cls):
 
 
 # ------------------------------------------------------------------------------ #
-#  Block grafting Attack:                         
-#  honest, 
-#  then train (reduced) with last layers (softmax and layer before) 
-#  and graft that watermark onto the global model              
+#  Block grafting Attack (group L):                         
+#  honest warmup, then every free-ride round: train only the last layers on a
+#  reduced shard (cpc), and optionally graft the freshly trained scope onto the
+#  current global model so the body follows the global exactly
+#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it | "block2")
+#    graft  <- tap_coast_mode == "graft"
+#    cpc    <- autop_common_per_class ; warmup <- autop_honest_until/_calib_rounds
 # ------------------------------------------------------------------------------ #
-# TODO: graftblock attack: 
-# same warmup, no estimating treshold or anything, 
-# just reduced data amount (cpc=5)
-# + scope at last 2 blocks (last 2 layers: softmax and layer before) 
-# + grafting just the last two layers onto the global model received
 def make_graftblock_attack(base_cls):
-    # TODO
-    return make_adaptive_tap_attack(base_cls) # placeholder for now
+
+    class GraftBlockFreeRider(_SimpleFRMixin, base_cls):
+        is_free_rider = True
+        attack_name = "graftblock"
+        # ---- SCOPE = trailing parameter tensors stay trainable ----
+        # ResNet-18 has 62 named parameter tensors (~11.2M scalars)
+        # keep the outer layers trainable and freeze earlier layers - at global model
+        #   "head2"  keep = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
+        #                          fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
+        #            = the SOFTMAX/OUTPUT layer (fc) + the CONV LAYER JUST BEFORE it
+        #   "block2" keep = 20 -> the last ~2.5 residual blocks + fc, ~9.04M scalars
+        #            (~80% of the model). Much wider than head2: it retrains most of
+        #            the upper network, not just the output end. 
+        _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
+
+        def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,
+                     calib_rounds: int = 4, scope: str = "head2", graft: bool = False,
+                     n_common_classes: int = -1, trigger_train_n: int = -1, **kw):
+            super().__init__(*a, **kw)
+            self.common_per_class = int(common_per_class)
+            self.honest_rounds = int(honest_rounds)
+            self.calib_rounds = int(calib_rounds)
+            self.scope = str(scope)
+            self.graft = bool(graft)
+            self.n_common_classes = int(n_common_classes)
+            self.trigger_train_n = int(trigger_train_n)
+            self._prepared = False
+            self._orig_loader = self.loader
+            self.trace = []
+
+        # scope freeze/restore ----------
+        def _freeze_scope(self):
+            keep = self._SCOPE_KEEP.get(self.scope)
+            named = list(self.model.named_parameters())
+            if keep is None:
+                for _, p in named:
+                    p.requires_grad_(True)
+                return
+            cut = len(named) - int(keep)
+            for i, (_, p) in enumerate(named):
+                p.requires_grad_(i >= cut)
+
+        def _restore_scope(self):
+            for p in self.model.parameters():
+                p.requires_grad_(True)
+
+        def _scope_keys(self):
+            keep = self._SCOPE_KEEP.get(self.scope) or 2
+            named = list(self.model.named_parameters())
+            return [name for name, _ in named[len(named) - int(keep):]]
+
+        def produce_update(self, global_state, prev_global_state, round_idx):
+            phase = self._phase_action(round_idx)      # honest | calib | freeride
+            if phase != "freeride":
+                # warmup / calibration window: pure honest client on the full shard
+                submit, n = super().produce_update(global_state, prev_global_state, round_idx)
+                self.trace.append({"round": round_idx, "action": phase, "eta_frozen": None})
+                return submit, n
+            # free-ride: reduced shard + scope-limited training (+ optional graft)
+            self._prepare(max(0, self.common_per_class),
+                          n_common_classes=self.n_common_classes,
+                          trigger_train_n=self.trigger_train_n)
+            self.loader = self._reduced_loader
+            self._freeze_scope()                       # only the last layers move
+            try:
+                submit, n = super().produce_update(global_state, prev_global_state, round_idx)
+            finally:
+                self._restore_scope()
+                self.loader = self._orig_loader
+            if self.graft:
+                # body := the exact current global; keep only the freshly-trained scope
+                grafted = {k: v.clone() for k, v in global_state.items()}
+                for k in self._scope_keys():
+                    if k in submit:
+                        grafted[k] = submit[k].clone()
+                submit = grafted
+            self.trace.append({"round": round_idx, "action": "tap", "eta_frozen": None,
+                               "reduced_n": getattr(self, "_reduced_n", self.num_samples),
+                               "common_per_class": self.common_per_class,
+                               "scope": self.scope, "graft": self.graft,
+                               "n_trigger_train": getattr(self, "_trigger_train_n", None),
+                               "n_common_classes": self.n_common_classes})
+            return submit, n
+
+    return GraftBlockFreeRider
