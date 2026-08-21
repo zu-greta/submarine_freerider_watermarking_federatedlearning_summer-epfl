@@ -221,7 +221,7 @@ phase_plot(){
   # reduced + last-layers-only (+ optional graft)
   #   head2  scope = softmax fc + the conv layer just before it (last 5 tensors)
   #   block2 scope = last 20 tensors 
-  L_FAMS="L1_graftblock_head2_c36 L2_graftblock_block2_c36 L3_graftblock_head2_graft_c36 L4_graftblock_block2_graft_c36"
+  L_FAMS="L1_graftblock_head2_c36 L2_graftblock_block2_c36 L3_graftblock_head2_graft_c36 L4_graftblock_block2_graft_c36 L5_graftblock_head2_c17"
   for fam in $L_FAMS; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
     run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"

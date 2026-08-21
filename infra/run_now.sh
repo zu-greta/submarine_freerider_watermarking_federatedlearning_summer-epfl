@@ -280,55 +280,69 @@ if has K; then
          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
 
-  # K4 -- block2 scope, hard/medium classes 3,6 (headline all-dynamic)
+  # K4 -- block2 scope, hard/medium classes 3,6 
   for s in $SEEDS_K; do
     env $kbase TAP_SCOPE=block2 FAMILY="K4_alldyn_block2_c36" \
         NOTE="K4 hard classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K4 -- block2 scope, EASY classes 1,7  (corrected: free_rider_ids=1,7)
+  # K4 -- block2 scope, EASY classes 1,7  
   for s in $SEEDS_K; do
     env $kbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 FAMILY="K4_alldyn_block2_c17" \
         NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K5 -- full scope (scope ablation vs K4/block2), classes 3,6
+  # # K5 -- full scope (scope ablation vs K4/block2), classes 3,6
+  # for s in $SEEDS_K; do
+  #   env $kbase TAP_SCOPE=full FAMILY="K5_alldyn_full_c36" \
+  #       NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
+
+  # K9 -- HEAD2 scope submarine (all-dynamic), matches LastBlock's head2 scope 
+  #       K9 hard/medium classes 3,6
   for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=full FAMILY="K5_alldyn_full_c36" \
-        NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
+    env $kbase TAP_SCOPE=head2 FAMILY="K9_alldyn_head2_c36" \
+        NOTE="K9 hard classes all-dynamic + head2 (self-eta, derived margin, dynamic warmup)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # K9 -- head2 scope, EASY classes 1,7
+  for s in $SEEDS_K; do
+    env $kbase TAP_SCOPE=head2 FREE_RIDER_IDS=1,7 FAMILY="K9_alldyn_head2_c17" \
+        NOTE="K9 easy classes all-dynamic + head2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
 
-  # kfix = FIXED-margin cost-optimised base (self-eta, FIXED margin, dynamic warmup, block2).
-  #   K7 and K8 differ only in margin / max_coast / cpc (set per-run below).
-  kfix="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
-         AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 \
-         TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
-         TAP_GRAFT_DECAY=0.10 TAP_MARGIN_MODE=fixed ROUNDS=50 FAST_DATA=1 \
-         TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
-         TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
-         TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2"
+  # # kfix = FIXED-margin cost-optimised base (self-eta, FIXED margin, dynamic warmup, block2).
+  # #   K7 and K8 differ only in margin / max_coast / cpc (set per-run below).
+  # kfix="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+  #        AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 \
+  #        TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+  #        TAP_GRAFT_DECAY=0.10 TAP_MARGIN_MODE=fixed ROUNDS=50 FAST_DATA=1 \
+  #        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
+  #        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+  #        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2"
 
-  # K7 -- hard-class data bump: fixed margin 0.03, longer coast (12), cpc 10, classes 3,6
-  for s in $SEEDS_K; do
-    env $kfix TAP_MARGIN=0.03 TAP_MAX_COAST=12 TAP_DATA_CPC=10 \
-        FAMILY="K7_costopt_block2_cpc10_c36" \
-        NOTE="K7 fixed-margin block2, cpc=10 (more embed signal on the hard class)" \
-        ./submit_experiment.sh 14 "$s"
-  done
-  # K8 -- margin optimized submarine: fixed margin 0.12 (stops over-threshold spikes), coast 8, cpc 5.
-  for s in $SEEDS_K; do
-    env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 \
-        FAMILY="K8_opt_block2_c36" \
-        NOTE="K8 optimised block2 (fixed margin 0.12) -- hard classes 3,6" \
-        ./submit_experiment.sh 14 "$s"
-  done
-  for s in $SEEDS_K; do
-    env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 FREE_RIDER_IDS=1,7 \
-        FAMILY="K8_opt_block2_c17" \
-        NOTE="K8 optimised block2 (fixed margin 0.12) -- easy classes 1,7" \
-        ./submit_experiment.sh 14 "$s"
-  done
+  # # K7 -- hard-class data bump: fixed margin 0.03, longer coast (12), cpc 10, classes 3,6
+  # for s in $SEEDS_K; do
+  #   env $kfix TAP_MARGIN=0.03 TAP_MAX_COAST=12 TAP_DATA_CPC=10 \
+  #       FAMILY="K7_costopt_block2_cpc10_c36" \
+  #       NOTE="K7 fixed-margin block2, cpc=10 (more embed signal on the hard class)" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
+  # # K8 -- margin optimized submarine: fixed margin 0.12 (stops over-threshold spikes), coast 8, cpc 5.
+  # for s in $SEEDS_K; do
+  #   env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 \
+  #       FAMILY="K8_opt_block2_c36" \
+  #       NOTE="K8 optimised block2 (fixed margin 0.12) -- hard classes 3,6" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
+  # for s in $SEEDS_K; do
+  #   env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 FREE_RIDER_IDS=1,7 \
+  #       FAMILY="K8_opt_block2_c17" \
+  #       NOTE="K8 optimised block2 (fixed margin 0.12) -- easy classes 1,7" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
 fi
 
 # ---------------------------------------------------------------------------
@@ -381,7 +395,7 @@ if has L; then
   #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
   #     block2 = last 20 tensors
   # ---------------------------------------------------------------------------
-  SEEDS_L="${SEEDS_L:-1000}"                        # single seed each
+  SEEDS_L="${SEEDS_L:-0 1 2}"                        # single seed each
   lbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
          AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          WM_ETA_FIXED=0.064 FREE_RIDER_IDS=3,6"
@@ -392,19 +406,25 @@ if has L; then
         NOTE="L1 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 3,6)" \
         ./submit_experiment.sh 14 "$s"
     # L2 -- block2 scope, no graft
-    env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=decay \
-        FAMILY="L2_graftblock_block2_c36" \
-        NOTE="L2 graftblock reduced cpc5 + block2 no graft (classes 3,6)" \
-        ./submit_experiment.sh 14 "$s"
+    # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=decay \
+    #     FAMILY="L2_graftblock_block2_c36" \
+    #     NOTE="L2 graftblock reduced cpc5 + block2 no graft (classes 3,6)" \
+    #     ./submit_experiment.sh 14 "$s"
     # L3 -- head2 scope + graft trained scope onto global each round
-    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=graft \
-        FAMILY="L3_graftblock_head2_graft_c36" \
-        NOTE="L3 graftblock reduced cpc5 + head2 + graft onto global each round (classes 3,6)" \
-        ./submit_experiment.sh 14 "$s"
+    # env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=graft \
+    #     FAMILY="L3_graftblock_head2_graft_c36" \
+    #     NOTE="L3 graftblock reduced cpc5 + head2 + graft onto global each round (classes 3,6)" \
+    #     ./submit_experiment.sh 14 "$s"
     # L4 -- block2 scope + graft trained scope onto global each round
-    env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=graft \
-        FAMILY="L4_graftblock_block2_graft_c36" \
-        NOTE="L4 graftblock reduced cpc5 + block2 + graft onto global each round (classes 3,6)" \
+    # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=graft \
+    #     FAMILY="L4_graftblock_block2_graft_c36" \
+    #     NOTE="L4 graftblock reduced cpc5 + block2 + graft onto global each round (classes 3,6)" \
+    #     ./submit_experiment.sh 14 "$s"
+    # L5 -- L1 but on the easy classes 1,7
+    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=decay \
+        FREE_RIDER_IDS=1,7 \
+        FAMILY="L5_graftblock_head2_c17" \
+        NOTE="L5 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 1,7)" \
         ./submit_experiment.sh 14 "$s"
   done
 fi

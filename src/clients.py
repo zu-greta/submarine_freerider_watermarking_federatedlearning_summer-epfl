@@ -715,7 +715,9 @@ def make_adaptive_tap_attack(base_cls):
         attack_name = "adaptive_tap"
 
         # full => everything trainable (identical to the honest path).
-        _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head": 2}
+        #   head2 = softmax fc + the conv layer just before it (last 5 tensors, ~21%)
+        #   block2 = last 20 tensors (~80%).  Kept identical to GraftBlockFreeRider
+        _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
 
         def __init__(self, *a, oracle_eta: float = 0.0, honest_rounds: int = 12,
                      calib_rounds: int = 4, eta_source: str = "oracle",

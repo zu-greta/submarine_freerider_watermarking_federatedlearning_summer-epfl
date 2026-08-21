@@ -659,10 +659,18 @@ TODO
 - write paper based on storyline - add results
 - finish running all experiments and collect results and plot
 
-
 - training on just the last two layers (softmax and the layer before) -> block2?
 - grafting
 -> reduced training + grafting just the block2 that you train on -> do this for entire, no sub
+
+- [x] get results from block graft runs - analyse + send to chat
+
+- run the head2 with subamarine attack
+- get results and adjust the algo and results
+
+- cleanup code and docs - and remove code not needed anymore
+- finsih up writing intro and exps and algorithms
+- insert the raw data for plots in overleaf
 
 ---
 
