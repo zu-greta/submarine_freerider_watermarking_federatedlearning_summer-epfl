@@ -37,9 +37,7 @@ GIT_REPO="https://github.com/zu-greta/submarine_freerider_watermarking_federated
 GIT_BRANCH="${GIT_BRANCH:-main}"
 SCRIPT="${SCRIPT:-scripts/run_experiment.py}"
 
-# --- self-check: no single quote may appear inside the pod block -----------
-# The pod command is bash -c <single-quoted>. A stray single quote closes it and
-# the outer shell then expands $tag/$out itself, dying under set -u. 
+
 _B=$(grep -n "POD_BLOCK_BEGIN" "$0" | tail -1 | cut -d: -f1)
 _E=$(grep -n "POD_BLOCK_END"   "$0" | tail -1 | cut -d: -f1)
 if [ -n "${_B:-}" ] && [ -n "${_E:-}" ] && [ "$_E" -gt "$_B" ]; then
@@ -50,8 +48,7 @@ if [ -n "${_B:-}" ] && [ -n "${_E:-}" ] && [ "$_E" -gt "$_B" ]; then
     echo "   Replace them with double quotes. Nothing was submitted."
     exit 1
   fi
-  # runai strips backslashes in transit, so printf "%s\n" prints a literal n and
-  # printf "\t" yields a literal t. Ban them from the block outright.
+  
   _BS=$(sed -n "$((_B+1)),$((_E-1))p" "$0" | grep -c "[\\]" || true)
   if [ "${_BS:-0}" -gt 0 ]; then
     echo "!! INTERNAL BUG: $_BS backslash(es) inside the pod block (lines $_B-$_E)."
@@ -67,16 +64,11 @@ fi
 
 TOTAL=$(grep -cve '^[[:space:]]*$' "$JOBS_FILE")
 
-# --- validate node-pool names up front -------------------------------------
-# runai rejects an unknown pool per-job, so without this you get PODS failures
-# in a row and (before the exit-code fix below) a cheerful "submitted" banner.
+# --- validate node-pool names -------------------------------------
 if [ "${#_POOLS[@]}" -gt 0 ]; then
   RAW=$(runai list node-pools 2>/dev/null | sed '/deprecat/d;/^$/d')
-  # CLI v1 has no 'list node-pools': it silently falls through to the JOB list.
   if grep -qi 'Showing jobs' <<< "$RAW" || [ -z "$RAW" ]; then
-    echo "!! This runai CLI does not support 'list node-pools', so POOLS cannot be"
-    echo "   validated -- and pinning will almost certainly be rejected."
-    echo "   Drop POOLS and launch unpinned instead:"
+    echo "!! This runai CLI does not support 'list node-pools'"
     echo "       WORKERS=3 PODS=2 ./submit_pool.sh"
     exit 1
   fi
@@ -89,12 +81,7 @@ if [ "${#_POOLS[@]}" -gt 0 ]; then
       grep -qx -- "$pl" <<< "$AVAIL" || {
         echo "!! node-pool '$pl' does not exist on this cluster."
         echo "   available pools:"; sed 's/^/     /' <<< "$AVAIL"
-        echo
-        echo "   Either use a real name, or drop POOLS entirely and let the"
-        echo "   scheduler place the pods:"
         echo "       WORKERS=3 PODS=2 ./submit_pool.sh"
-        echo "   (WORKERS=3 is the safe uniform value when you do not know which"
-        echo "    pod lands on the 40GB card -- see the memory note at the bottom.)"
         exit 1; }
     done
     echo "node-pools validated: ${_POOLS[*]}"
@@ -103,9 +90,7 @@ fi
 
 echo "=== pool $POOL_TAG: $TOTAL runs -> $PODS pod(s), shared queue ==="
 
-# Every pod gets the full manifest and claims rows atomically from a shared
-# directory on the PVC. With mismatched GPUs this matters: a static split would
-# leave the fast pod idle while the slow one finished its half.
+
 FULL_B64=$(base64 -w0 < "$JOBS_FILE")
 SUBMITTED=0
 
@@ -127,7 +112,7 @@ for ((i=0; i<PODS; i++)); do
     -e "GIT_REPO=$GIT_REPO" -e "GIT_BRANCH=$GIT_BRANCH" \
     -e "SCRIPT=$SCRIPT" \
     --command -- bash -c '
-      # POD_BLOCK_BEGIN  (no single quotes past this line -- see self-check above)
+      # POD_BLOCK_BEGIN  
       set -uo pipefail
       export USER=zu
       mkdir -p "$RESULTS_ROOT" "$DATA_ROOT" "$RESULTS_ROOT/.poollogs"
@@ -139,11 +124,6 @@ for ((i=0; i<PODS; i++)); do
       echo "  node            ${NODE_NAME:-unknown}"
       nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null | sed "s/^/  gpu: /"
 
-      # --- adapt WORKERS to the card we actually landed on -------------------
-      # The cluster has A100-80 (32 nodes), A100-40 (16) and H100-80 (3), and no
-      # node-pool labels, so you cannot request one. Eq.14 keeps a model copy PER
-      # CLIENT: a 200-client run needs ~9 GB on its own, so 6 concurrent want
-      # ~57 GB -- fine on 80 GB, an OOM on 40. Cap ourselves instead of guessing.
       GPU_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1)
       if [ -n "${GPU_MB:-}" ] && [ "$GPU_MB" -lt 60000 ] && [ "$WORKERS" -gt 3 ]; then
         echo "  !! only ${GPU_MB} MiB of GPU memory -- capping WORKERS $WORKERS -> 3"
@@ -164,9 +144,7 @@ for ((i=0; i<PODS; i++)); do
       # keep N processes from each grabbing every core
       export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
 
-      # ---- datasets, ONCE, under a lock ----------------------------------
-      # Six workers calling download=True against an empty volume race and leave
-      # a half-written archive. This is the classic overnight-run killer.
+      # ---- datasets, once, under a lock ----------------------------------
       LOCK="$DATA_ROOT/.dl.lock"
       for t in $(seq 1 120); do mkdir "$LOCK" 2>/dev/null && break; sleep 10; done
       python - <<PY
@@ -180,22 +158,11 @@ PY
       rmdir "$LOCK" 2>/dev/null
 
       # ---- manifest ------------------------------------------------------
-      # IMPORTANT: no BACKSLASH may appear anywhere in this block. runai strips
-      # them in transit, so a printf newline escape prints a literal n and a
-      # printf tab escape yields a literal t. That is why IFS splitting failed and
-      # fields split on every letter t. cut -f defaults to TAB and needs no
-      # escape at all, so fields are extracted with cut instead of read+IFS.
       echo "$SHARD_B64" | base64 -d > /tmp/shard.tsv
       N=$(grep -c . /tmp/shard.tsv)
       echo "  shard: $N runs"
       echo "================================================================"
 
-      # mkdir is atomic on POSIX, so two pods can never take the same row.
-      # A claim also carries a HEARTBEAT. Without it, a pod killed mid-run (which
-      # is what preemption does -- SIGKILL, no cleanup) would leave the claim
-      # directory behind with no result.json, and every future pod would skip
-      # that row forever. With it, a claim whose heartbeat has gone stale is
-      # reclaimable, so preempted work is automatically retried.
       CLAIMS="$RESULTS_ROOT/.claims_${POOL_TAG}"
       STALE="${STALE:-1200}"          # seconds without a heartbeat -> reclaimable
       mkdir -p "$CLAIMS"
@@ -218,7 +185,6 @@ PY
         local tag="$1" cfg="$2" rep="$3" extra="$4" note="$5"
         local out="$RESULTS_ROOT/$tag"
         claim "$tag" || return 0
-        # keep the claim alive while this run works
         ( while :; do date +%s > "$CLAIMS/$tag/hb" 2>/dev/null || exit; sleep 120; done ) &
         local HB=$!
         trap "kill $HB 2>/dev/null" RETURN
@@ -227,16 +193,10 @@ PY
         echo "START $tag"
         local arr=($extra)
         [ -n "$note" ] && arr+=(--manifest_note "$note")
-        # POOL_WORKERS tells the runner how many concurrent runs share this GPU, so it
-        # can mark gpu_ms absolute-reliability in result.json (ratio stays valid regardless).
         POOL_WORKERS="$WORKERS" python -u "$SCRIPT" --config_idx "$cfg" --repeat "$rep" --device cuda --output_dir "$out" --data_root "$DATA_ROOT" "${arr[@]}" > "$out/pod_run.log" 2>&1
         local rc=$?
-        # exit 2 = accuracy outside the config band. NORMAL for attack runs and
+        # exit 2 = accuracy outside the config band. normal for attack runs and
         # result.json is written before the exit. Not a failure.
-        # rc=2 is ambiguous: run_experiment.py uses it for "accuracy outside the
-        # expected band" (NORMAL for attack runs, result.json already written)
-        # but argparse ALSO exits 2 on a bad command line, where nothing ran.
-        # Distinguish on whether result.json actually exists.
         if [ "$rc" = "2" ] && [ ! -s "$out/result.json" ]; then rc=99; fi
         case "$rc" in
           0|2) kill $HB 2>/dev/null; echo "DONE  $tag rc=$rc $((SECONDS-t0))s" ;;

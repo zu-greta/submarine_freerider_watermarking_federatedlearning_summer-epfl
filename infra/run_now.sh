@@ -4,23 +4,22 @@
 # Called by runbook.sh manifest. Submits nothing; submit_pool.sh runs it.
 #
 #   ./run_now.sh              # default groups (A)
-#   ./run_now.sh "E EA K"     # E + EA + K together   (WHOLE tokens, space/comma separated)
+#   ./run_now.sh "E EA K"     # E + EA + K together   (whole tokens, space/comma separated)
 #   ./run_now.sh A            # just group A
 #
-# GROUPS (tokens are matched WHOLE: "H T EA" -> H, T, EA; NOT E or A)
+# GROUPS (tokens are matched whole: "H T EA" -> H, T, EA; not E or A)
 #   A  proven IID baseline (A1 honest, A2 reduced easy c17, A3 reduced hard c36)
-#   T  honest band GENERALITY: trigger classes beyond 0-9 (maps to 40-49 and 90-99)
+#   T  honest band generality: trigger classes beyond 0-9 (check the mapping)
 #   D  reduced free-rider +N data-budget spectrum (c36)
 #   E  non-IID starved (E1 honest, E2 reduced, E3 alpha sweep)
 #   EA non-IID distribution-aware assignment (EA1 honest, EA2 reduced)
 #   H  baseline free-riders (positive controls that MUST be caught): H5 previous-models
 #      on c100 (our setting) + H6 gaussian-noise on c100.  Paper-setting CIFAR-10 rows
 #      are the optional `grade` phase (paper_check), not here.
-#   K  the submarine: K4 (block2, headline) + K5 (full scope, ablation)
-#   Z  no-watermark control (all-honest, lambda=0) for the trig_acc causation check
-#   Y  ORACLE-THRESHOLD ablation (J4): the submarine handed the true eta instead of
-#      self-estimating it, at classes 3,6 AND 1,7 (single seed). Supports "we grant the
-#      defender a best-case oracle threshold and the attack STILL evades."
+#   K  the submarine: K4 (block2 scope) + K9 (head2 scope) - 1,7 and 3,6
+#   L  graftblock free-rider (last-block-only) - 1,7 and 3,6
+#   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
+#   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6)
 #
 # =============================================================================
 set -uo pipefail
@@ -181,8 +180,7 @@ if has E; then
         FAMILY="E4_submarine_niid_c17" \
         NOTE="E4 easy non-iid submarine (self-eta, derived margin, dynamic warmup) on distribution-aware assignment" ./submit_experiment.sh 14 "$s"
   done
-  # --- submarine non-iid ALPHA SWEEP (hard c36): gives the amplification plots an alpha axis ---
-  # (a=0.5 is E4_submarine_niid_c36 above; add the extremes a=0.1 and a=1.0)
+  # --- submarine non-iid ALPHA SWEEP (hard c36) ---
   for A in 0.1 1.0; do
     ATAG=$(echo "a$A" | tr -d '.')
     for s in $SEEDS_E; do
@@ -266,7 +264,7 @@ fi
 
 # ---------------------------------------------------------------------------
 # GROUP K -- SUBMARINE (self-estimated eta, derived margin, dynamic warmup).
-#   K4 = block2 scope (headline, 3 seeds). K5 = full scope (ablation, 3 seeds).
+#   K4 = block2 scope (1,7 and 3,6 - 3 seeds). K9 = head2 scope (1,7 and 3,6 - 3 seeds)
 # ---------------------------------------------------------------------------
 if has K; then
   SEEDS_K="${SEEDS_K:-0 1 2}"
@@ -292,7 +290,7 @@ if has K; then
         NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # # K5 -- full scope (scope ablation vs K4/block2), classes 3,6
+  # # K5 -- full scope - classes 3,6
   # for s in $SEEDS_K; do
   #   env $kbase TAP_SCOPE=full FAMILY="K5_alldyn_full_c36" \
   #       NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
@@ -350,7 +348,7 @@ fi
 #   All-honest run with the watermark embedding disabled (WM_LAMBDA=0) 
 # ---------------------------------------------------------------------------
 if has Z; then
-  SEEDS_Z="${SEEDS_Z:-0}"                      # single seed: direction-of-effect only
+  SEEDS_Z="${SEEDS_Z:-0}"                      # single seed
   for s in $SEEDS_Z; do
     env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 WM_LAMBDA=0 \
         FAMILY="A0_nowm_honest_c100" \
@@ -360,12 +358,11 @@ if has Z; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP Y -- J4 ORACLE-ETA (single seed).  
-#   J4 = the oracle-eta version of K4: identical block2 + graft mechanism, but the
-#   free-rider is given the true threshold (AUTOP_ORACLE_ETA=0.264, target 0.234)
+# GROUP Y -- J4 oracle threshold - K4 submarine match 
+#   J4 = the oracle-eta version of K4 - (AUTOP_ORACLE_ETA=0.264, target 0.234)
 # ---------------------------------------------------------------------------
 if has Y; then
-  SEEDS_Y="${SEEDS_Y:-0 1 2}"                      # single seed 
+  SEEDS_Y="${SEEDS_Y:-0 1 2}"                      
   jbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 TAP_DATA_CPC=5 TAP_ETA_SOURCE=oracle \
          TAP_PROBE_HOLDOUT=16 TAP_SCOPE=block2 TAP_COAST_MODE=graft TAP_WHEN=threshold \
@@ -389,23 +386,20 @@ fi
 if has L; then
   # ---------------------------------------------------------------------------
   # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock").
-  #   Warm up honest, then every free-ride round train only the last layers on a
-  #   reduced shard (cpc=5); optionally graft that trained scope onto the current
-  #   global model each round (body then follows the global exactly)
+  #   Warm up honest, then free-ride train only the last layers on a reduced shard (cpc=5)
   #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
-  #     block2 = last 20 tensors
   # ---------------------------------------------------------------------------
-  SEEDS_L="${SEEDS_L:-0 1 2}"                        # single seed each
+  SEEDS_L="${SEEDS_L:-0 1 2}"                        
   lbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
          AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          WM_ETA_FIXED=0.064 FREE_RIDER_IDS=3,6"
   for s in $SEEDS_L; do
-    # L1 -- head2 scope (softmax + previous layer), no graft
+    # L1 -- head2 scope (softmax + previous layer)
     env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=decay \
         FAMILY="L1_graftblock_head2_c36" \
         NOTE="L1 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 3,6)" \
         ./submit_experiment.sh 14 "$s"
-    # L2 -- block2 scope, no graft
+    # L2 -- block2 (20 tensors) scope, no graft
     # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=decay \
     #     FAMILY="L2_graftblock_block2_c36" \
     #     NOTE="L2 graftblock reduced cpc5 + block2 no graft (classes 3,6)" \
@@ -415,7 +409,7 @@ if has L; then
     #     FAMILY="L3_graftblock_head2_graft_c36" \
     #     NOTE="L3 graftblock reduced cpc5 + head2 + graft onto global each round (classes 3,6)" \
     #     ./submit_experiment.sh 14 "$s"
-    # L4 -- block2 scope + graft trained scope onto global each round
+    # L4 -- block2 (20 tensors) scope + graft trained scope onto global each round
     # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=graft \
     #     FAMILY="L4_graftblock_block2_graft_c36" \
     #     NOTE="L4 graftblock reduced cpc5 + block2 + graft onto global each round (classes 3,6)" \

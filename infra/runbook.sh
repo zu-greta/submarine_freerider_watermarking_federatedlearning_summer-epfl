@@ -21,7 +21,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
 
 # ---- batch selection --------------------------------------------------------
 # Default = A
-BATCH="${BATCH:-A}"   # WHOLE tokens, space/comma separated: "H T EA" 
+BATCH="${BATCH:-A}"   # whole tokens, space/comma separated: "H T EA" 
 PAPER_OK="${PAPER_OK:-0}"          # 1 = also build probe-gated paper rows (grade phase)
 FAST_DATA="${FAST_DATA:-1}"        # 1 = GPU-resident loaders (kills DataLoader fork storms)
 DETERMINISM="${DETERMINISM:-0}"    # 0 = cuDNN autotuner on (~1.3-2x; stat. identical over seeds)
@@ -32,7 +32,7 @@ RES="${RES:-/mnt/nfs/home/zu/results}"   # cluster results (submit) OR local dir
 OUT="${OUT:-$RES/figs}"
 ALL="$RES/*/result.json"
 
-# ---- frozen references. Change here, applied to every plot ----
+# ---- frozen references for plotting ----
 HON=A1_honest_c100                 # honest calibration family (IID, c100, 10 clients)
 HONCLASS="${HONCLASS:-A1_honest_c100}"   # all-honest family for the class-acc bar chart
 ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose
@@ -53,7 +53,7 @@ phase_manifest(){
   echo ">>> MANIFEST: groups=[$BATCH] PAPER_OK=$PAPER_OK FAST_DATA=$FAST_DATA DETERMINISM=$DETERMINISM"
   rm -f jobs.tsv
   FAST_DATA="$FAST_DATA" DETERMINISM="$DETERMINISM" PAPER_OK="$PAPER_OK" ./run_now.sh "$BATCH"
-  echo "   -> jobs.tsv built. Review the per-family counts above."
+  echo "   -> jobs.tsv built."
 }
 
 phase_submit(){
@@ -75,9 +75,7 @@ phase_monitor(){
 }
 
 # ---------------------------------------------------------------------------
-# 4. ALL FIGURES. eta is FROZEN.
-#    Organised strictly by experiment group; every call maps to a merged plots.py
-#    subcommand. Families that are not present yet are skipped by run{} with a note.
+# 4. ALL FIGURES. eta frozen
 # ---------------------------------------------------------------------------
 phase_plot(){
   mkdir -p "$OUT"; echo ">>> PLOT -> $OUT"
@@ -105,7 +103,7 @@ phase_plot(){
   # MERGED honest-floor timeline across A1 + every decade run (scales to 100 classes).
   ATFAMS="$HON $TDECADES"
   run "$PL honest_floors_all --in '$ALL' --families $ATFAMS --eta_tight $ETA_T --eta_loose $ETA_L --tail 20 --out $OUT/honest_floors_all"
-  # Ranked per-class band (same data, sorted). Not framed as a paper reproduction.
+  # Ranked per-class band (same data, sorted)
   run "$PL pooled_band --in '$ALL' --families $ATFAMS --tail 20 --out $OUT/pooled_band_AT"
 
   # ===================== GROUP H -- baseline free-riders (must be CAUGHT) ====
@@ -133,7 +131,7 @@ phase_plot(){
   run "$PL iso_pair    --honest_in '$RES/EA1_honest_niid_distrib_c100_rep*/result.json' --fr_in '$ALL' --family EA2_reduced_niid_distrib_c36 --class 6 --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/iso_EA2_c6"
   run "$PL gpu_savings --in '$ALL' --family EA2_reduced_niid_distrib_c36 --out $OUT/gpu_savings_EA2_reduced_niid_distrib_c36"
 
-  # ===== NON-IID SUBMARINE: full suite + timelines (same views as IID K group) =====
+  # ===== NON-IID SUBMARINE: full suite + timelines =====
   # E* = random trigger assignment (honest floor from E1) ; EA* = fair (honest floor from EA1)
   NIID_SUB="E4_submarine_niid_c36 E4_submarine_niid_c17 E4_submarine_niid_c36_a01 E4_submarine_niid_c36_a10 EA3_submarine_niid_distrib_c36 EA3_submarine_niid_distrib_c17"
   for fam in $NIID_SUB; do
@@ -208,8 +206,8 @@ phase_plot(){
   run "$PL class_acc        --in '$ALL' --family A0_nowm_honest_c100 --out $OUT/A0_nowm_class_acc"
 
   # ===================== GROUP Y -- ORACLE-THRESHOLD ablation (J4) ==========
-  # J4 = the submarine handed the TRUE eta (0.264) instead of self-estimating it.
-  # c36 => classes 3,6 ; c17 => classes 1,7. Distinct out-prefixes (no overwrite).
+  # J4 = the submarine handed the eta (0.264) instead of self-estimating it.
+  # c36 => classes 3,6 ; c17 => classes 1,7
   for fam in J4_scope_graft_block2_c36 J4_scope_graft_block2_c17; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
     run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"
@@ -218,9 +216,8 @@ phase_plot(){
   done
 
   # ===================== GROUP L -- block-graft free-rider =================
-  # reduced + last-layers-only (+ optional graft)
+  # reduced + last-layers-only
   #   head2  scope = softmax fc + the conv layer just before it (last 5 tensors)
-  #   block2 scope = last 20 tensors 
   L_FAMS="L1_graftblock_head2_c36 L2_graftblock_block2_c36 L3_graftblock_head2_graft_c36 L4_graftblock_block2_graft_c36 L5_graftblock_head2_c17"
   for fam in $L_FAMS; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
@@ -240,7 +237,7 @@ phase_plot(){
 }
 
 phase_grade(){
-  # OPTIONAL paper-reproduction tables (needs the probe-gated paper rows, PAPER_OK=1).
+  # optional paper-reproduction tables (needs the probe-gated paper rows, PAPER_OK=1).
   echo ">>> GRADE vs the FareMark paper (optional; needs paper-repro families)"
   run "$PC --row t9 --in '$ALL' --family F3_tableIX_c10_nc50 --heldout-family F3_tableIX_c10_nc50_heldout"
   run "$PC --row c10 --in '$ALL' --family H1_honest_c10"

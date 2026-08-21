@@ -5,14 +5,14 @@ SECTION 2  WATERMARK   WatermarkClient (Eq.11-12 + Eq.14 memory)
                         build_watermarked_clients      
 SECTION 3  ATTACKERS   _SimpleFRMixin, make_reduced_attack,
                         make_adaptive_tap_attack (submarine),
-                        make_graftblock_attack (last-layers-only + optional graft)
+                        make_graftblock_attack (last-layers-only)
 
 
 Client                          honest FedAvg: load global -> local SGD -> return
     +-- WatermarkClient         ... + L_wm on trigger-class samples + Eq.14 memory update
     +-- ReducedFreeRider        ... but trains on a reduced shard after round W
     +-- AdaptiveTapFreeRider    ... the submarine: estimates eta, warmup rounds, coast/tap
-    +-- GraftBlockFreeRider     ... graft last layers onto global model after reduced training on last layers only
+    +-- GraftBlockFreeRider     ... train reduced on last layers only and keep global model body 
 """
 
 from __future__ import annotations
@@ -990,27 +990,11 @@ def make_adaptive_tap_attack(base_cls):
 
     return AdaptiveTapFreeRider
 
-
-# =============================================================================
-# NOTE ON THE "SUBMARINE"
-# =============================================================================
-# The adaptive submarine is `AdaptiveTapFreeRider` (attack="adaptive_tap").
-# It estimate its own eta, warm up until convergence, then coast/tap to hold its mark
-# -- via the tap_* knobs:
-#   * self-estimated eta ....... eta_source="self", eta_k
-#   * dynamic warmup ........... warmup_mode="dynamic", conv_eps, conv_patience,
-#                                honest_min, warmup_cap
-#   * uncertainty-scaled margin  margin_mode="derived", margin_k
-#   * coast without a replay ... coast_mode="graft" (+ scope) 
-
-
 # ------------------------------------------------------------------------------ #
-#  Block grafting Attack (group L):                         
+#  Final block Attack (group L):                         
 #  honest warmup, then every free-ride round: train only the last layers on a
-#  reduced shard (cpc), and optionally graft the freshly trained scope onto the
-#  current global model so the body follows the global exactly
-#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it | "block2")
-#    graft  <- tap_coast_mode == "graft"
+#  reduced shard (cpc)
+#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it)
 #    cpc    <- autop_common_per_class ; warmup <- autop_honest_until/_calib_rounds
 # ------------------------------------------------------------------------------ #
 def make_graftblock_attack(base_cls):
@@ -1023,10 +1007,9 @@ def make_graftblock_attack(base_cls):
         # keep the outer layers trainable and freeze earlier layers - at global model
         #   "head2"  keep = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
         #                          fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
-        #            = the SOFTMAX/OUTPUT layer (fc) + the CONV LAYER JUST BEFORE it
+        #            = the SOFTMAX/OUTPUT layer (fc) + the conv layer right before
         #   "block2" keep = 20 -> the last ~2.5 residual blocks + fc, ~9.04M scalars
-        #            (~80% of the model). Much wider than head2: it retrains most of
-        #            the upper network, not just the output end. 
+        #            (~80% of the model). - legacy
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
 
         def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,

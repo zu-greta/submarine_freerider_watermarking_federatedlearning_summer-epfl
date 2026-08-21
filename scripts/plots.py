@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 """plots.py -- all figures for the output-layer-watermarking free-rider study.
 
-(FareMark is one instance of the detector family we attack; keep names generic.)
-
 Subcommands (one per figure family):
 
   honest_lines     honest BER per trigger class over rounds         -> A1/E1/T1/T2_class_floors
@@ -19,7 +17,7 @@ Subcommands (one per figure family):
   iso_pair         isolated same-class BER, honest vs FR            -> iso_*  (cross-run)
   iso_acc          isolated same-class accuracy, honest vs FR       -> iso_acc_*
 
-  --- submarine (K/J) tap-coast, three views ---
+  --- submarine + final block (K/J/L) tap-coast, views ---
   tap_perfr        seed-band single graph (mean over seeds)         -> tap_perfr_* / tap_J4_*
   tap_perseed      one panel per seed (no marker collisions)        -> *_perseed
   tap_effort       BER + cumulative samples side by side (effort)   -> *_effort

@@ -155,11 +155,8 @@ runai submit "$JOB_NAME" \
     mkdir -p "$OUTPUT_DIR" "$DATA_ROOT"
     exec > >(tee "$OUTPUT_DIR/pod.log") 2>&1
     # ---- pod.log structure -------------------------------------------------
-    # pod.log is the ENVIRONMENT record (what machine, what code, what flags);
-    # run.log is the EXPERIMENT record; result.json is the DATA. Previously
-    # pod.log was an undelimited tee of git-clone noise + run.log, so you could
-    # not answer "which commit produced this number?" -- the pod clones a moving
-    # branch, so two runs a week apart can be different code, identical config.
+    # pod.log is the environment record (what machine, what code, what flags);
+    # run.log is the experiment record; result.json is the data
     echo "================================================================"
     echo "== POD =="
     echo "================================================================"
@@ -173,13 +170,10 @@ runai submit "$JOB_NAME" \
 
     echo "== CODE =="
     rm -rf /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl
-    # NOTE: still --depth 1 (fast). rev-parse below pins the exact commit anyway.
     git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl 2>&1 | sed "s/^/  /"
     if [ ! -d "/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl" ]; then
       echo "ERROR: /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl not found in the repo."; sync; sleep 2; exit 3
     fi
-    # ADDED: exact commit SHA. Exported so run_experiment.py records it in
-    # result.json["env"]["git_commit"] -- the run becomes self-identifying code-wise.
     GIT_COMMIT="$(git -C /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl rev-parse HEAD 2>/dev/null || echo unknown)"
     export GIT_COMMIT GIT_BRANCH
     printf "  %-22s %s\n" "repo"    "$GIT_REPO"
@@ -206,13 +200,12 @@ runai submit "$JOB_NAME" \
     set -u; set -e
     echo "================================================================"
     echo "== EXIT =="
-    # Exit 2 = accuracy outside the expected_acc band of the config. EXPECTED for
+    # Exit 2 = accuracy outside the expected_acc band of the config. expected for
     # attack runs (free-riders drag accuracy down) and result.json is already
-    # written. Only 1/3/>=4 are real failures. Spelling this out in pod.log stops
-    # `runai` job-failure noise from being mistaken for lost data.
+    # written. Only 1/3/>=4 are real failures
     case "$EXIT" in
       0) echo "  exit 0  OK (accuracy inside expected band)" ;;
-      2) echo "  exit 2  accuracy outside expected band -- NORMAL for attack runs;"
+      2) echo "  exit 2  accuracy outside expected band -- normal for attack runs;"
          echo "          result.json was written before exit, data is intact." ;;
       *) echo "  exit $EXIT  FAILED -- inspect run.log above" ;;
     esac

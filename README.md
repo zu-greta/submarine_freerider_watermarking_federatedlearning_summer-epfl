@@ -1,4 +1,4 @@
-# submarine_freerider_watermarking_federatedlearning_summer-epfl
+# submarine_freerider_watermarking_federatedlearning_summer-epfl - TODO
 
 Summer@EPFL 2026 - SaCS lab project
 
