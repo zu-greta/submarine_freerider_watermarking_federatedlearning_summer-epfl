@@ -25,6 +25,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from . import watermark as wm
+from . import watermark_fedipr as wf
 from .compute_meter import ComputeMeter
 
 
@@ -90,7 +91,10 @@ class WatermarkClient(Client):
                  target_bits: torch.Tensor, wm_lambda: float = 5.0,
                  wm_kind: str = "power", wm_alpha: float = 0.4,
                  wm_beta: float = 0.6, label_smoothing: float = 0.1,
-                 exclude: object = "trigger", **kw):
+                 exclude: object = "trigger",
+                 wm_scheme: str = "faremark",
+                 fedipr_trig_x: torch.Tensor | None = None,
+                 fedipr_trig_y: torch.Tensor | None = None, **kw):
         super().__init__(*args, **kw)
         self.trigger_class = trigger_class
         self.key = key
@@ -103,11 +107,23 @@ class WatermarkClient(Client):
         self.exclude = trigger_class if exclude == "trigger" else exclude
         self.memory: dict | None = None
         self.meter = ComputeMeter()
+        # ---- FedIPR backdoor scheme state ----
+        self.wm_scheme = str(wm_scheme)
+        # trigger images embedded each round; the full registered set for an honest client
+        self._wm_trig_x = fedipr_trig_x
+        self._wm_trig_y = fedipr_trig_y
+        self._fedipr_full_x = fedipr_trig_x
+        self._fedipr_full_y = fedipr_trig_y
 
     # ---- method to override ------------------------------------------------
     def produce_update(self, global_state: dict, prev_global_state, round_idx):
         self.model.load_state_dict(global_state) # start from the global model
         self.meter.start_round(round_idx) # start timing the round
+        if self.wm_scheme == "fedipr":
+            # FedIPR backdoor: task CE + trigger CE (alpha=1), plain FedAvg update
+            self._local_train_fedipr(round_idx)
+            self.meter.end_round(trained=True)
+            return _to_cpu_state(self.model), self.num_samples
         self._local_train_wm(round_idx) # train L = L_cl + lambda * L_wm and log the two loss terms
         self.meter.end_round(trained=True) # end timing the round
         w_sgd = _to_cpu_state(self.model) # get the SGD-updated model
@@ -170,6 +186,66 @@ class WatermarkClient(Client):
             "total_loss": round(tot_sum / max(n_batches, 1), 5),
             "trig_train_acc": round(trig_correct / trig_total, 4) if trig_total else None,
             # number of trigger class samples client saw in the round (can be 0 or very few in non-iid)
+            "n_trigger_samples": int(trig_total),
+            "trigger_class": int(self.trigger_class),
+        }
+
+    # ---- FedIPR backdoor embedding (L_task + CE(trigger -> target label)) ---
+    def _local_train_fedipr(self, round_idx=None):
+        """Task CE on the local shard + CE on the trigger set to its secret target
+        label (alpha=1). Under a scope freeze (attacker tap) only the unfrozen
+        tensors move -- identical mechanism to the FareMark path."""
+        self.model.train()
+        opt = torch.optim.SGD(self.model.parameters(), lr=self.lr,
+                              momentum=self.momentum, weight_decay=self.weight_decay)
+        tx, ty = getattr(self, "_wm_trig_x", None), getattr(self, "_wm_trig_y", None)
+        has_trig = tx is not None and len(tx) > 0
+        bs = getattr(self.loader, "batch_size", 16) or 16
+        cl_sum = wm_sum = tot_sum = 0.0
+        n_batches = n_wm_batches = 0
+        trig_correct = trig_total = 0
+        for _ in range(self.local_epochs):
+            # --- task pass on the (possibly reduced) local loader ---
+            for x, y in self.loader:
+                x, y = x.to(self.device), y.to(self.device)
+                opt.zero_grad()
+                loss = F.cross_entropy(self.model(x), y,
+                                       label_smoothing=self.label_smoothing)
+                loss.backward()
+                if not torch.isfinite(loss):
+                    opt.zero_grad(set_to_none=True); continue
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                opt.step()
+                cl_sum += float(loss.detach()); tot_sum += float(loss.detach()); n_batches += 1
+                if self.meter is not None and self.meter._cur is not None:
+                    self.meter.record_batch(len(x))
+            # --- trigger (backdoor) pass: CE to the target label ---
+            if has_trig:
+                perm = torch.randperm(len(tx))
+                for i in range(0, len(tx), bs):
+                    idx = perm[i:i + bs]
+                    xb, yb = tx[idx].to(self.device), ty[idx].to(self.device)
+                    opt.zero_grad()
+                    logits = self.model(xb)
+                    wml = wf.embed_loss(logits, yb)
+                    wml.backward()
+                    if not torch.isfinite(wml):
+                        opt.zero_grad(set_to_none=True); continue
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                    opt.step()
+                    wm_sum += float(wml.detach()); n_wm_batches += 1
+                    with torch.no_grad():
+                        trig_correct += int((logits.argmax(1) == yb).sum())
+                        trig_total += int(len(yb))
+                    if self.meter is not None and self.meter._cur is not None:
+                        self.meter.record_batch(len(xb))
+        if not hasattr(self, "wm_stats"):
+            self.wm_stats = {}
+        self.wm_stats[int(round_idx) if round_idx is not None else len(self.wm_stats)] = {
+            "cls_loss": round(cl_sum / max(n_batches, 1), 5),
+            "wm_loss": round(wm_sum / max(n_wm_batches, 1), 5) if n_wm_batches else None,
+            "total_loss": round(tot_sum / max(n_batches, 1), 5),
+            "trig_train_acc": round(trig_correct / trig_total, 4) if trig_total else None,
             "n_trigger_samples": int(trig_total),
             "trigger_class": int(self.trigger_class),
         }
@@ -258,9 +334,11 @@ def _assign_triggers_by_distribution(client_loaders, num_classes, reserve=None):
 
 
 def build_watermarked_clients(cfg, client_loaders, model, device, seed,
-                              num_classes, registry):
-    """Factory: Each client gets a unique trigger class + secret key + bits.
+                              num_classes, registry, data_root=None):
+    """Factory: Each client gets a unique trigger class + secret key + bits
+    (FareMark), or a private OOD trigger set + target label (FedIPR backdoor).
     Returns (clients, free_rider_indices)."""
+    scheme = str(getattr(cfg, "wm_scheme", "faremark"))
 
     # random (unbalanced) keys, full softmax (no trigger-class exclusion), m = n//10
     PF_GROUP = 10                                  # TODO hardcoded: bits-per-class divisor (m = num_classes // 10)
@@ -310,27 +388,55 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     registry.trigger_holdings = {}      # cid -> #images of its trigger class in its shard
     registry.shard_sizes = {}           # cid -> total shard size
 
+    # ---- FedIPR: build every client's private OOD trigger set up front -------
+    fedipr_sets = {}
+    if scheme == "fedipr":
+        # infer input geometry from a data sample 
+        in_ch, hw = 3, 32
+        for _x, _y in client_loaders[0]:
+            in_ch, hw = int(_x.shape[1]), int(_x.shape[2]); break
+        fedipr_sets = wf.build_client_triggersets(
+            range(len(client_loaders)), int(getattr(cfg, "fedipr_num_trigger", 40)),
+            num_classes, cfg.dataset, in_ch, hw, seed,
+            source=getattr(cfg, "fedipr_trigger_source", "svhn"),
+            target_mode=getattr(cfg, "fedipr_target_mode", "cid"),
+            data_root=data_root, folder=getattr(cfg, "fedipr_trigger_dir", "") or None)
+        registry.scheme = "fedipr"
+
     clients, unembed = [], []
     # build each client with its trigger class, key, and target bits
     for cid, loader in enumerate(client_loaders):
-        # priority: explicit map > distribution assignment > round-robin
-        if cid in tmap:
-            trigger_class = tmap[cid]
-        elif cid in dist_assign:
-            trigger_class = dist_assign[cid]
+        # ---- FedIPR backdoor: target label + private OOD trigger set ----
+        if scheme == "fedipr":
+            ts = fedipr_sets[cid]
+            trigger_class = int(ts["target"])   # target label (kept in trigger_class so plots group)
+            key = bits = None
+            unembed.append(0.0)
+            registry.register_fedipr(cid, trigger_class, ts["x"], ts["y"])
+            registry.trigger_holdings[cid] = int(len(ts["x"]))
+            registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
+            fedipr_kw = dict(wm_scheme="fedipr",
+                             fedipr_trig_x=ts["x"], fedipr_trig_y=ts["y"])
         else:
-            trigger_class = cid % num_classes
-        # key balance config: balanced=True removes structurally-unembeddable same-sign rows 
-        bal = bool(getattr(cfg, "wm_balanced_keys", False))
-        key = wm.make_key(m, l, seed=seed + 1000 * cid + 1, balanced=bal)
-        unembed.append(wm.unembeddable_fraction(key)) # compute the fraction of same-sign rows (structurally unembeddable)
-        bits = wm.make_bits(m, seed=seed + 1000 * cid + 1) # random target bits for the watermark
-        reg_exclude = exclude_col              # None = full softmax; "trigger" = extra tests
-        registry.register(cid, trigger_class, key, bits,
-                          kind=cfg.wm_f, alpha=cfg.wm_alpha, exclude=reg_exclude) # register the client's watermark parameters in the registry
-        # record how many trigger-class images this client actually holds (fairness signal)
-        registry.trigger_holdings[cid] = int(_counts[cid][trigger_class]) if cid < len(_counts) else None
-        registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
+            # priority: explicit map > distribution assignment > round-robin
+            if cid in tmap:
+                trigger_class = tmap[cid]
+            elif cid in dist_assign:
+                trigger_class = dist_assign[cid]
+            else:
+                trigger_class = cid % num_classes
+            # key balance config: balanced=True removes structurally-unembeddable same-sign rows
+            bal = bool(getattr(cfg, "wm_balanced_keys", False))
+            key = wm.make_key(m, l, seed=seed + 1000 * cid + 1, balanced=bal)
+            unembed.append(wm.unembeddable_fraction(key)) # compute the fraction of same-sign rows (structurally unembeddable)
+            bits = wm.make_bits(m, seed=seed + 1000 * cid + 1) # random target bits for the watermark
+            reg_exclude = exclude_col              # None = full softmax; "trigger" = extra tests
+            registry.register(cid, trigger_class, key, bits,
+                              kind=cfg.wm_f, alpha=cfg.wm_alpha, exclude=reg_exclude) # register the client's watermark parameters in the registry
+            # record how many trigger-class images this client actually holds (fairness signal)
+            registry.trigger_holdings[cid] = int(_counts[cid][trigger_class]) if cid < len(_counts) else None
+            registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
+            fedipr_kw = {}
 
         # common arguments for all clients
         common = dict(cid=cid, model=model, train_loader=loader, device=device,
@@ -343,7 +449,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                 trigger_class=trigger_class, key=key, target_bits=bits,
                 wm_lambda=cfg.wm_lambda, wm_kind=cfg.wm_f, wm_alpha=cfg.wm_alpha,
                 wm_beta=cfg.wm_beta, label_smoothing=cfg.wm_label_smoothing,
-                exclude=exclude_col)
+                exclude=exclude_col, **fedipr_kw)
             # FR with reduced shard
             if attack == "reduced":
                 cls = make_reduced_attack(WatermarkClient)
@@ -414,10 +520,14 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                 trigger_class=trigger_class, key=key, target_bits=bits,
                 wm_lambda=cfg.wm_lambda, wm_kind=cfg.wm_f, wm_alpha=cfg.wm_alpha,
                 wm_beta=cfg.wm_beta, label_smoothing=cfg.wm_label_smoothing,
-                exclude=exclude_col, **common))
+                exclude=exclude_col, **fedipr_kw, **common))
 
     frac = sum(unembed) / len(unembed) if unembed else 0.0
-    registry.m, registry.l = m, l
+    if scheme == "fedipr":
+        # no key geometry; report trigger-set size so logs/results stay populated
+        registry.m, registry.l = int(getattr(cfg, "fedipr_num_trigger", 40)), 1
+    else:
+        registry.m, registry.l = m, l
     registry.unembeddable_frac = round(frac, 4)
     if frac > 0.10:
         import warnings
@@ -575,6 +685,9 @@ class _SimpleFRMixin:
         """Build the reduced loader once. Optionally hold out a few trigger to measure generalisation"""
         if getattr(self, "_prepared", False):
             return
+        if getattr(self, "wm_scheme", "faremark") == "fedipr":
+            return self._prepare_fedipr(common_per_class, n_probe_holdout,
+                                        n_common_classes, trigger_train_n)
         self._prepared = True
         bs = getattr(self.loader, "batch_size", 16) or 16 # batch size for the reduced loader
 
@@ -621,10 +734,77 @@ class _SimpleFRMixin:
         self._reduced_n = len(X) # number of samples in the reduced loader
         self._reduced_loader = DataLoader(TensorDataset(X, Y), batch_size=min(bs, max(1, len(X))), shuffle=True) 
 
+    def _prepare_fedipr(self, common_per_class: int, n_probe_holdout: int = 0,
+                        n_common_classes: int = -1, trigger_train_n: int = -1):
+        """FedIPR analogue of _prepare: split the client's own trigger set into an
+        embed slice + a held-out probe slice, and build a reduced task loader of
+        N common-class images from the shard. The trigger images (not shard rows)
+        are what re-embeds the backdoor. Unlike FareMark there is no trigger
+        class to mask out of the shard."""
+        if getattr(self, "_prepared", False):
+            return
+        self._prepared = True
+        bs = getattr(self._orig_loader, "batch_size", 16) or 16
+        fx = getattr(self, "_fedipr_full_x", None)
+        fy = getattr(self, "_fedipr_full_y", None)
+        if fx is None:                                   # fall back to whatever was set
+            fx, fy = self._wm_trig_x, self._wm_trig_y
+        n_trig = 0 if fx is None else len(fx)
+        MIN_TRAIN_TRIG = 8
+        if n_probe_holdout and n_trig >= 2 * MIN_TRAIN_TRIG:
+            k = min(int(n_probe_holdout), n_trig - MIN_TRAIN_TRIG, n_trig // 2)
+        else:
+            k = 0
+        self._probe_x = fx[:k].clone() if k > 0 else None
+        self._probe_y = fy[:k].clone() if k > 0 else None
+        trig_train_x = fx[k:] if k > 0 else fx
+        trig_train_y = fy[k:] if k > 0 else fy
+        self._n_probe = int(k)
+        if trigger_train_n is not None and trigger_train_n >= 0 and trig_train_x is not None:
+            trig_train_x = trig_train_x[:trigger_train_n]
+            trig_train_y = trig_train_y[:trigger_train_n]
+        self._trigger_train_n = 0 if trig_train_x is None else len(trig_train_x)
+        # the embed slice consumed by _local_train_fedipr on a tap
+        self._wm_trig_x, self._wm_trig_y = trig_train_x, trig_train_y
+
+        # reduced task loader: N images per class from the shard (keeps the main
+        # task from drifting while the head re-embeds). cpc<=0 -> trigger-only tap.
+        if common_per_class > 0:
+            comm_x, comm_y = [], []
+            for x, y in self._orig_loader:
+                comm_x.append(x.detach().cpu()); comm_y.append(y.detach().cpu())
+            cx, cy = torch.cat(comm_x), torch.cat(comm_y)
+            classes = cy.unique()
+            if n_common_classes is not None and 0 < n_common_classes < len(classes):
+                sel = torch.randperm(len(classes))[:n_common_classes]
+                classes = classes[sel]
+            self._common_classes_used = [int(c) for c in classes]
+            xs, ys = [], []
+            for cls in classes:
+                idx = (cy == cls).nonzero(as_tuple=True)[0]
+                take = idx[torch.randperm(len(idx))[:common_per_class]]
+                xs.append(cx[take]); ys.append(cy[take])
+            X, Y = torch.cat(xs), torch.cat(ys)
+            self._reduced_n = len(X)
+            self._reduced_loader = DataLoader(TensorDataset(X, Y),
+                                              batch_size=min(bs, max(1, len(X))),
+                                              shuffle=True)
+        else:
+            self._reduced_n = 0
+            self._reduced_loader = []                    # trigger-only: no task batches
+
     @torch.no_grad()
     def _probe_ber(self, state) -> float | None:
         """BER of this client's mark in `state`, on held-out trigger images.
         used by the adaptive-tap free-rider to decide whether to coast or tap."""
+        if getattr(self, "wm_scheme", "faremark") == "fedipr": # FedIPR backdoor: probe on the held-out trigger images
+            if getattr(self, "_probe_x", None) is None:
+                return None
+            self.model.load_state_dict(state) # load the model state to evaluate on the probe
+            self.model.eval()
+            pred = self.model(self._probe_x.to(self.device)).argmax(dim=1).cpu() # predict on the probe images
+            acc = (pred == self._probe_y.cpu()).float().mean().item()
+            return float(1.0 - acc)                       # ber = 1 - trigger acc
         if getattr(self, "_probe_x", None) is None:
             return None
         self.model.load_state_dict(state)

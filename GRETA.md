@@ -675,14 +675,14 @@ TODO
 - insert the raw data for plots in overleaf
 
 put the current data and plots on overleaf
-run another img dataset
-send code to maxime to run another task - cleanup the dataset part to send
+[x] run another img dataset
+[x] send code to maxime to run another task 
 
 clenaup to one attack and put submarine as extra
 
 implement the fedipr - last layer watermark
 
-watermark loss or total loss - difficult class meaning
+watermark loss or total loss - difficult class meaning -> send c explanation table
 
 ---
 

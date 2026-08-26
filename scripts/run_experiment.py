@@ -87,6 +87,20 @@ def parse_args():
     # ---- watermarking overrides ----
     p.add_argument("--watermark", dest="watermark", action="store_true", default=None)
     p.add_argument("--no_watermark", dest="watermark", action="store_false")
+    p.add_argument("--wm_scheme", type=str, default=None,
+                   choices=["faremark", "fedipr"],
+                   help="output-layer watermark scheme: faremark (softmax-BER) or "
+                        "fedipr (backdoor trigger-set). Default faremark.")
+    p.add_argument("--fedipr_num_trigger", type=int, default=None,
+                   help="FedIPR: trigger images per client.")
+    p.add_argument("--fedipr_trigger_source", type=str, default=None,
+                   choices=["svhn", "noise", "folder"],
+                   help="FedIPR trigger images: svhn (OOD real), noise (self-contained), folder.")
+    p.add_argument("--fedipr_trigger_dir", type=str, default=None,
+                   help="FedIPR: image folder when fedipr_trigger_source=folder.")
+    p.add_argument("--fedipr_target_mode", type=str, default=None,
+                   choices=["cid", "fixed", "random"],
+                   help="FedIPR trigger target label: cid (cid%%n), fixed (=5), random.")
     p.add_argument("--wm_bits", type=int, default=None)
     p.add_argument("--wm_balanced_keys", dest="wm_balanced_keys",
                    action="store_true", default=None,
@@ -171,6 +185,9 @@ _OVERRIDABLE = [
     
     "watermark", "wm_bits", "wm_balanced_keys", "wm_trigger_assign", "wm_f", "wm_alpha", "wm_num_triggers",
     "wm_trigger_mode", "wm_lambda", "wm_beta",
+    # output-layer scheme selector + FedIPR backdoor knobs
+    "wm_scheme", "fedipr_num_trigger", "fedipr_trigger_source",
+    "fedipr_trigger_dir", "fedipr_target_mode",
     "wm_eta_floor", "wm_eta_fixed", "calib_on_all",
     "tap_eta_source", "tap_eta_k", "tap_margin", "tap_when", "tap_period",
     "tap_max_coast", "tap_data_cpc", "tap_scope", "tap_coast_mode", "tap_graft_decay", "tap_probe_holdout",
@@ -182,10 +199,8 @@ _OVERRIDABLE = [
 
 @torch.no_grad()
 def evaluate_per_class(model, loader, num_classes, device):
-    """Per-class test accuracy and mean cross-entropy loss of the (final global)
-    model. This is the watermark-independent evidence that some class indexes have
-    fuzzier decision boundaries: a hard class shows low acc / high loss here, and
-    (separately) a high watermark BER. Returns ({class: {acc, loss, n}}, overall_acc)"""
+    """Per-class test accuracy and mean cross-entropy loss of the (final global) model
+    Returns ({class: {acc, loss, n}}, overall_acc)"""
     import torch.nn.functional as F
     model.eval()
     correct = [0] * num_classes
@@ -240,11 +255,9 @@ def collect_compute(clients, free_rider_indices):
         return round(sum(v) / len(v), 3) if v else 0.0
 
     hm_gpu, fm_gpu, hm_s, fm_s = _mean(honest_gpu), _mean(fr_gpu), _mean(honest_s), _mean(fr_s)
-    # Concurrency note for gpu_ms: honest & free-rider clients run in the SAME process,
-    # so if this run shares a GPU with others (WORKERS>1 in submit_pool), SM contention
-    # inflates every client's gpu_ms EQUALLY -> the RATIO (effort_ratio_gpu) and the
-    # gpu_savings fraction curve stay valid, but ABSOLUTE gpu_ms is not comparable across
-    # differently-loaded pods. `samples` is contention-free and is the safe cross-run axis.
+    # Concurrency note for gpu_ms: honest & free-rider clients run in the same process.
+    # use the ratio (effort_ratio_gpu) and the gpu_savings fraction curve stay valid
+    # `samples` is contention-free and is the safe cross-run axis.
     concurrency = int(os.environ.get("POOL_WORKERS", "1") or "1")
     summary = {
         "honest_mean_gpu_ms": hm_gpu, "fr_mean_gpu_ms": fm_gpu,
@@ -252,7 +265,7 @@ def collect_compute(clients, free_rider_indices):
         "effort_ratio_gpu": round(fm_gpu / hm_gpu, 4) if hm_gpu else None,
         "effort_ratio_samples": round(fm_s / hm_s, 4) if hm_s else None,
         # provenance so plots can warn: gpu_ms absolute values are only clean at concurrency 1;
-        # the ratio is valid at any concurrency (same-process inflation cancels).
+        # the ratio is valid at any concurrency
         "gpu_concurrency": concurrency,
         "gpu_ms_abs_reliable": concurrency <= 1,
     }
@@ -329,22 +342,30 @@ def main():
         registry = WatermarkRegistry()
         clients, free_rider_indices = build_watermarked_clients(
             cfg, data.client_loaders, model, device, seed,
-            data.num_classes, registry)
+            data.num_classes, registry, data_root=args.data_root)
         verify_model = build_model(cfg.model, data.num_classes, data.in_channels)
         classes = sorted({e["trigger_class"] for e in registry.entries.values()})
-        tmode = getattr(cfg, "wm_trigger_mode", "class")
-        per_client_bank = (tmode != "class")
-        if tmode == "client_train":
-            # paper V-F3 trigger-sample consistency: verify on the client's OWN train imgs
-            trigger_bank = build_trigger_bank_from_train(
-                data.client_loaders, registry, cfg.wm_num_triggers)
-        elif tmode == "client":
-            # paper V-F3 client-specific trigger variations, held-out
-            trigger_bank = build_trigger_bank_per_client(
-                data.test_dataset, registry, cfg.wm_num_triggers, seed=seed)
+        scheme = str(getattr(cfg, "wm_scheme", "faremark"))
+        if scheme == "fedipr":
+            # FedIPR verifier reads each client's registered trigger set directly;
+            # no shared/per-client test-image bank is needed.
+            tmode = "fedipr_backdoor"
+            per_client_bank = False
+            trigger_bank = {}
         else:
-            trigger_bank = build_trigger_bank(data.test_dataset, classes,
-                                              cfg.wm_num_triggers, seed=seed)
+            tmode = getattr(cfg, "wm_trigger_mode", "class")
+            per_client_bank = (tmode != "class")
+            if tmode == "client_train":
+                # paper V-F3 trigger-sample consistency: verify on the client's own train imgs
+                trigger_bank = build_trigger_bank_from_train(
+                    data.client_loaders, registry, cfg.wm_num_triggers)
+            elif tmode == "client":
+                # paper V-F3 client-specific trigger variations, held-out
+                trigger_bank = build_trigger_bank_per_client(
+                    data.test_dataset, registry, cfg.wm_num_triggers, seed=seed)
+            else:
+                trigger_bank = build_trigger_bank(data.test_dataset, classes,
+                                                  cfg.wm_num_triggers, seed=seed)
         n_clients_wm = len(registry.entries)
         # clients-per-trigger-class: >1 means oversubscription (paper Table IX capacity regime)
         cpc = {}
@@ -483,9 +504,6 @@ def main():
         # flops do not depend on this. Recorded so every run self-documents.
         "gpu_name": _gpu_name(),
         "gpu_count": (torch.cuda.device_count() if torch.cuda.is_available() else 0),
-        # software provenance. The pod clones GIT_BRANCH at submit time, so
-        # two runs a week apart can be different code with identical configs.
-        # git_commit is exported by infra/submit_experiment.sh inside the pod.
         "env": {
             "git_commit": os.environ.get("GIT_COMMIT"),
             "git_branch": os.environ.get("GIT_BRANCH"),

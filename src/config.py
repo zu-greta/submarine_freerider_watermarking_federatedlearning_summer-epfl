@@ -63,6 +63,15 @@ class ExpConfig:
 
     # ---- watermarking ----
     watermark: bool = False
+    # which OUTPUT-LAYER watermark scheme to embed/verify:
+    #   "faremark" (default) = box-free softmax-projection BER scheme (src/watermark.py)
+    #   "fedipr"             = FedIPR backdoor trigger-set scheme (src/watermark_fedipr.py)
+    wm_scheme: str = "faremark"
+    # ---- FedIPR backdoor knobs (when wm_scheme="fedipr") ----
+    fedipr_num_trigger: int = 40            # trigger images per client (repo default 40)
+    fedipr_trigger_source: str = "svhn"     # "svhn" (OOD real) | "noise" (self-contained) | "folder"
+    fedipr_trigger_dir: str = ""            # image folder when fedipr_trigger_source="folder"
+    fedipr_target_mode: str = "cid"         # target label: "cid" (cid%%n) | "fixed" (=5) | "random"
     wm_bits: int = 0                        # m; 0 -> auto
     wm_balanced_keys: bool = False          # False = random +/-1 keys. True = sign-balanced rows 
     wm_trigger_assign: str = "roundrobin"   # trigger-class -> client assignment policy:

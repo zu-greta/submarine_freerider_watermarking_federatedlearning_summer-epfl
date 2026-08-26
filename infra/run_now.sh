@@ -20,6 +20,7 @@
 #   L  graftblock free-rider (last-block-only) - 1,7 and 3,6
 #   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
 #   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6)
+#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr.     
 #
 # =============================================================================
 set -uo pipefail
@@ -420,6 +421,70 @@ if has L; then
         FAMILY="L5_graftblock_head2_c17" \
         NOTE="L5 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 1,7)" \
         ./submit_experiment.sh 14 "$s"
+  done
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP F -- FedIPR backdoor = the second output-layer watermark scheme.
+#   Mirrors A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, but with
+#   WM_SCHEME=fedipr. Trigger images: SVHN OOD by default (downloaded like CIFAR;
+#   set FEDIPR_TRIGGER_SOURCE=noise for a self-contained no-download run, or
+#   =folder with FEDIPR_TRIGGER_DIR=<path> for an exact trigger folder).
+#   ber_fedipr = 1 - trigger_set_accuracy, so every plot/eta path is reused.
+#   eta: recalibrate from F_A1_honest (honest ber ~ 0). FEDIPR_ETA is tmp
+# ---------------------------------------------------------------------------
+if has F; then
+  SEEDS_F="${SEEDS_F:-0 1 2}"
+  FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-svhn} \
+      FEDIPR_NUM_TRIGGER=${FEDIPR_NUM_TRIGGER:-40} FEDIPR_TARGET_MODE=${FEDIPR_TARGET_MODE:-cid}"
+  FIETA="${FEDIPR_ETA:-0.20}"
+
+  # F_A1 -- honest baseline (calibration source + honest floor). No eta (calib run).
+  for s in 0 1 2 3 4 5; do
+    env $FI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+        FAMILY="F_A1_honest_c100_fi" NOTE="F_A1 FedIPR honest baseline (calibration)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # F_H5 / F_H6 -- positive controls (MUST be caught: trigger acc ~ chance).
+  for s in 0 1 2; do
+    env $FI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=$FIETA ROUNDS=50 \
+        FAMILY="F_H5_prevmodel_c100_fi" NOTE="F_H5 FedIPR previous-models control" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in 0 1 2; do
+    env $FI ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=$FIETA ROUNDS=50 \
+        FAMILY="F_H6_gaussian_c100_fi" NOTE="F_H6 FedIPR gaussian-noise control" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # F_L1 / F_L5 -- graftblock head2 (MAIN attack): re-embed the backdoor using only
+  #   the softmax fc + preceding conv, on the client's own trigger set + cpc5 common.
+  fbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
+         AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=$FIETA"
+  for s in $SEEDS_F; do
+    env $FI $fbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
+        FAMILY="F_L1_graftblock_head2_c36_fi" \
+        NOTE="F_L1 FedIPR graftblock head2 (hard 3,6)" ./submit_experiment.sh 14 "$s"
+    env $FI $fbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
+        FAMILY="F_L5_graftblock_head2_c17_fi" \
+        NOTE="F_L5 FedIPR graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
+  done
+  # F_K9 / F_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
+  fkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+          AUTOP_ORACLE_ETA=$FIETA WM_ETA_FIXED=$FIETA TAP_DATA_CPC=5 \
+          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+          TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+          TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
+  for s in $SEEDS_F; do
+    env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
+        FAMILY="F_K9_alldyn_head2_c36_fi"  NOTE="F_K9 FedIPR submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
+    env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
+        FAMILY="F_K9_alldyn_head2_c17_fi"  NOTE="F_K9 FedIPR submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
+    env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
+        FAMILY="F_K4_alldyn_block2_c36_fi" NOTE="F_K4 FedIPR submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
+    env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
+        FAMILY="F_K4_alldyn_block2_c17_fi" NOTE="F_K4 FedIPR submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
   done
 fi
 

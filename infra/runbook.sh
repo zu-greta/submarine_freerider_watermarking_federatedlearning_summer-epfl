@@ -37,6 +37,11 @@ HON=A1_honest_c100                 # honest calibration family (IID, c100, 10 cl
 HONCLASS="${HONCLASS:-A1_honest_c100}"   # all-honest family for the class-acc bar chart
 ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose
 ETA_T_NIID="0.161"; ETA_L_NIID="0.576"   # non-IID eta tight / loose
+# ---- FedIPR (group F) frozen references ----
+HON_FI="${HON_FI:-F_A1_honest_c100_fi}"        # FedIPR honest calibration family (IID, c100)
+# ber_fedipr = 1 - trigger_acc; honest floor ~ 0. These are PROVISIONAL -- recalibrate
+# eta_tight = mu+3sigma of F_A1 honest ber (like ETA_T=0.064 for FareMark), then set here.
+ETA_T_FI="${ETA_T_FI:-0.20}"; ETA_L_FI="${ETA_L_FI:-0.50}"   # FedIPR eta tight / loose
 
 PL="python ../scripts/plots.py"   
 PC="python ../scripts/paper_check.py"
@@ -233,7 +238,49 @@ phase_plot(){
   # scope x graft ablation on one axis (savings + tap-fraction across the 4 L variants)
   run "$PL savings_vs_alpha --in '$ALL' --families $L_FAMS --out $OUT/savings_graftblock"
 
-  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control)"
+  # ===================== GROUP F -- FedIPR backdoor (2nd output-layer scheme) ==
+  # Mirror of A(honest) + H(controls) + K(submarine) + L(graftblock) for the FedIPR
+  # trigger-set watermark. Detection is ber_fedipr = 1 - trigger_set_accuracy
+  # c36 => free-riders on cids 3,6 (target labels 3,6) ; c17 => cids 1,7 (labels 1,7).
+
+  # -- honest baseline (calibration source + per-class floor) --
+  run "$PL honest_lines     --in '$ALL' --family $HON_FI --tail 20 --out $OUT/F_A1_class_floors"
+  run "$PL honest_per_round --in '$ALL' --family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_A1_honest_per_round"
+  run "$PL class_acc        --in '$ALL' --family $HON_FI --out $OUT/F_A0_class_acc"
+
+  # -- positive controls (must be CAUGHT: trigger acc ~ chance -> ber ~ 1) --
+  run "$PL timeline --in '$ALL' --family F_H5_prevmodel_c100_fi --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_H5_prevmodel_timeline"
+  run "$PL timeline --in '$ALL' --family F_H6_gaussian_c100_fi  --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_H6_gaussian_timeline"
+
+  # -- submarine (K) + graftblock (L) attack families --
+  F_C36="F_K9_alldyn_head2_c36_fi F_K4_alldyn_block2_c36_fi F_L1_graftblock_head2_c36_fi"
+  F_C17="F_K9_alldyn_head2_c17_fi F_K4_alldyn_block2_c17_fi F_L5_graftblock_head2_c17_fi"
+  for fam in $F_C36 $F_C17; do
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/tap_effort_${fam}"
+    run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_FI --out $OUT/accuracy_${fam}"
+    run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/timeline_${fam}"
+  done
+  # isolated same-class twin (honest from F_A1): c36 families at cls 3,6 ; c17 at cls 1,7
+  for fam in $F_C36; do
+    for cls in 3 6; do
+      run "$PL iso_pair --honest_in '$RES/${HON_FI}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  for fam in $F_C17; do
+    for cls in 1 7; do
+      run "$PL iso_pair --honest_in '$RES/${HON_FI}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  # honest per-class band vs ALL FedIPR FR operating points on one axis (the money plot:
+  # FR BER sits inside the honest band -> no threshold separates them, same as FareMark).
+  FFR=""
+  for fam in $F_C36 $F_C17; do FFR="$FFR '$RES/${fam}_rep*/result.json'"; done
+  run "$PL overlap --in '$ALL' --families $HON_FI --fr_in $FFR --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --tail 20 --out $OUT/F_overlap_band_vs_fr"
+
+  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr)"
 }
 
 phase_grade(){
@@ -266,7 +313,8 @@ runbook.sh -- run phases
     RES=~/local/results ./runbook.sh plot     4. ALL figures
     RES=~/local/results ./runbook.sh grade    5. paper tables (optional)
 
-  batch tokens (whole, space/comma separated): A T D E EA H K Y Z .
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F .
+     (F = FedIPR backdoor, the 2nd output-layer scheme: BATCH=F ./runbook.sh manifest)
 USAGE
     ;;
 esac

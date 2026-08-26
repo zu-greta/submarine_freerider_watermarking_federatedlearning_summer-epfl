@@ -66,6 +66,12 @@ PY_EXTRA=""
 [ -n "${AUTOP_N_COMMON_CLASSES:-}" ] && PY_EXTRA="$PY_EXTRA --autop_n_common_classes ${AUTOP_N_COMMON_CLASSES}"
 # watermarking
 [ -n "${WATERMARK:-}" ]        && PY_EXTRA="$PY_EXTRA --watermark"
+# output-layer scheme selector + FedIPR backdoor knobs (unset => FareMark, unchanged)
+[ -n "${WM_SCHEME:-}" ]            && PY_EXTRA="$PY_EXTRA --wm_scheme ${WM_SCHEME}"
+[ -n "${FEDIPR_NUM_TRIGGER:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_num_trigger ${FEDIPR_NUM_TRIGGER}"
+[ -n "${FEDIPR_TRIGGER_SOURCE:-}" ] && PY_EXTRA="$PY_EXTRA --fedipr_trigger_source ${FEDIPR_TRIGGER_SOURCE}"
+[ -n "${FEDIPR_TRIGGER_DIR:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_trigger_dir ${FEDIPR_TRIGGER_DIR}"
+[ -n "${FEDIPR_TARGET_MODE:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_target_mode ${FEDIPR_TARGET_MODE}"
 [ -n "${WM_BITS:-}" ]          && PY_EXTRA="$PY_EXTRA --wm_bits ${WM_BITS}"
 [ "${BALANCED:-}" = "1" ]      && PY_EXTRA="$PY_EXTRA --wm_balanced_keys"
 [ -n "${WM_TRIGGER_ASSIGN:-}" ] && PY_EXTRA="$PY_EXTRA --wm_trigger_assign ${WM_TRIGGER_ASSIGN}"

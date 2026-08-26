@@ -22,6 +22,7 @@ class WatermarkRegistry:
 
     def __init__(self):
         self.entries: dict[int, dict] = {}
+        self.scheme = "faremark"      # "faremark" | "fedipr" (which verifier branch to use)
         # filled in by build_watermarked_clients for self-documenting results:
         self.m = None                 # number of watermark bits per client
         self.l = None                 # group size (n//m or (n-1)//m)
@@ -37,6 +38,16 @@ class WatermarkRegistry:
         self.entries[cid] = dict(trigger_class=trigger_class, key=key,
                                  target_bits=target_bits, kind=kind, alpha=alpha,
                                  exclude=exc)
+
+    def register_fedipr(self, cid, target_label, trig_x, trig_y):
+        """FedIPR backdoor entry: the client's private trigger set + its secret
+        target label. `trigger_class` holds the target label """
+        self.scheme = "fedipr"
+        self.entries[cid] = dict(trigger_class=int(target_label), kind="fedipr",
+                                 alpha=None, exclude=None,
+                                 trig_x=trig_x, trig_y=trig_y,
+                                 # placeholders so any faremark-shaped reader is safe
+                                 key=None, target_bits=None)
 
     def __len__(self):
         return len(self.entries)
@@ -133,6 +144,7 @@ def make_verifier(registry, trigger_bank, verify_model, device,
     benign BER, pooled over honest-only seeds, frozen)
     """
     fr_set = set(free_rider_indices)
+    scheme = getattr(registry, "scheme", "faremark")
 
     @torch.no_grad()
     def verify_hook(server, rnd, updates):
@@ -141,12 +153,34 @@ def make_verifier(registry, trigger_bank, verify_model, device,
         verify_model.to(device).eval()
         # Pass 1: extract every client's watermark and measure BER (no flagging yet)
         measured = []            # (cid, ber, is_free_rider)
-        diag = {}                # cid -> per-class difficulty diagnostics 
+        diag = {}                # cid -> per-class difficulty diagnostics
         for cid, (state, _n) in enumerate(updates):
             entry = registry.entries.get(cid)
             if entry is None:
                 continue
             tc = entry["trigger_class"]
+
+            # ============ FedIPR backdoor branch ============
+            # Detection statistic is the trigger-set accuracy (Eq. eta_T); ber = 1 - acc
+            if scheme == "fedipr":
+                x = entry["trig_x"].to(device)
+                y = entry["trig_y"].to(device)
+                verify_model.load_state_dict(state)
+                logits = verify_model(x)
+                probs = F.softmax(logits, dim=1)
+                pred = probs.argmax(dim=1)
+                acc = (pred == y).float().mean().item()      # detection rate eta_T
+                ber = float(1.0 - acc)                       # <-- BER-mapping
+                pmax = probs.max(dim=1).values
+                ent = -(probs.clamp_min(1e-9) * probs.clamp_min(1e-9).log()).sum(dim=1).mean().item()
+                diag[cid] = {"trig_acc": round(acc, 4),      # == 1 - ber (real detection rate)
+                             "pmax": round(pmax.mean().item(), 4),
+                             "entropy": round(ent, 4),
+                             "dominance": None}
+                measured.append((cid, ber, cid in fr_set, tc))
+                continue
+            # ================================================
+
             # per_client_bank: each client has its own trigger images else the bank is shared per trigger class.
             bkey = cid if per_client_bank else tc
             if bkey not in trigger_bank:
