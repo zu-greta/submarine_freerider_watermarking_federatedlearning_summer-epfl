@@ -173,7 +173,7 @@ phase_plot(){
   #   tap_perfr = seed-band ; tap_perseed = per-seed panels ; tap_effort = BER+samples ;
   #   accuracy = main-task ; gpu_savings/timeline = cost & mean. FR cids auto-detected.
   K_C36="K4_alldyn_block2_c36 K5_alldyn_full_c36 K7_costopt_block2_cpc10_c36 K8_opt_block2_c36"
-  K_C17="K4_alldyn_block2_c17 K8_opt_block2_c17"
+  K_C17="K4_alldyn_block2_c17 K8_opt_block2_c17 K9_alldyn_head2_c17 K9_alldyn_head2_c36"
   for fam in $K_C36 $K_C17; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
     run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perseed_${fam}"

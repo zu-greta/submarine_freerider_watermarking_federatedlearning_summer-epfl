@@ -665,16 +665,28 @@ TODO
 
 - [x] get results from block graft runs - analyse + send to chat
 
-- run the head2 with subamarine attack
-- get results and adjust the algo and results
+- [x] run the head2 with subamarine attack
+- [x] get results and adjust the algo and results
+- [easy_k9](results/done_runs/figs/timeline_K9_alldyn_head2_c17.png) and [hard_k9](results/done_runs/figs/timeline_K9_alldyn_head2_c36.png) 
+- [easy_j4](results/done_runs/figs/timeline_J4_scope_graft_block2_c17.png) and [hard_j4](results/done_runs/figs/timeline_J4_scope_graft_block2_c36.png)
 
 - cleanup code and docs - and remove code not needed anymore
 - finsih up writing intro and exps and algorithms
 - insert the raw data for plots in overleaf
 
+put the current data and plots on overleaf
+run another img dataset
+send code to maxime to run another task - cleanup the dataset part to send
+
+clenaup to one attack and put submarine as extra
+
+implement the fedipr - last layer watermark
+
+watermark loss or total loss - difficult class meaning
+
 ---
 
-## paper notes
+-> paper notes
 - need to define the context - based on a generalized subset of the FareMark paper context
 - define free-riders carefully - justify why the definition differs from that of FedIPR (free-rider can do work)
 
