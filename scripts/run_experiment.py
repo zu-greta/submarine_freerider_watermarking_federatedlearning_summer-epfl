@@ -94,7 +94,7 @@ def parse_args():
     p.add_argument("--fedipr_num_trigger", type=int, default=None,
                    help="FedIPR: trigger images per client.")
     p.add_argument("--fedipr_trigger_source", type=str, default=None,
-                   choices=["svhn", "noise", "folder"],
+                   choices=["svhn", "noise", "folder", "indist"],
                    help="FedIPR trigger images: svhn (OOD real), noise (self-contained), folder.")
     p.add_argument("--fedipr_trigger_dir", type=str, default=None,
                    help="FedIPR: image folder when fedipr_trigger_source=folder.")
