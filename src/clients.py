@@ -109,7 +109,8 @@ class WatermarkClient(Client):
         self.meter = ComputeMeter()
         # ---- FedIPR backdoor scheme state ----
         self.wm_scheme = str(wm_scheme)
-        # trigger images embedded each round; the full registered set for an honest client
+        # trigger images embedded each round; the full registered set for an honest
+        # client, later re-sliced (train/holdout) by _SimpleFRMixin._prepare_fedipr.
         self._wm_trig_x = fedipr_trig_x
         self._wm_trig_y = fedipr_trig_y
         self._fedipr_full_x = fedipr_trig_x
@@ -192,58 +193,67 @@ class WatermarkClient(Client):
 
     # ---- FedIPR backdoor embedding (L_task + CE(trigger -> target label)) ---
     def _local_train_fedipr(self, round_idx=None):
-        """Task CE on the local shard + CE on the trigger set to its secret target
-        label (alpha=1). Under a scope freeze (attacker tap) only the unfrozen
-        tensors move -- identical mechanism to the FareMark path."""
+        """FedIPR Alg.3 backdoor embed: trigger samples are concatenated into each
+        normal training batch (alpha=1), not trained in a separate pass. Mixing keeps
+        BatchNorm's batch statistics task-dominated, so the (input->target) mark the FC
+        learns still holds under eval-mode running stats. A trigger-only pass (what we
+        did before) computes BN stats from triggers alone -> the mark collapses at
+        verification. Under a scope freeze (attacker tap) only the unfrozen tensors move."""
         self.model.train()
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
         tx, ty = getattr(self, "_wm_trig_x", None), getattr(self, "_wm_trig_y", None)
         has_trig = tx is not None and len(tx) > 0
-        bs = getattr(self.loader, "batch_size", 16) or 16
-        cl_sum = wm_sum = tot_sum = 0.0
-        n_batches = n_wm_batches = 0
+        K = min(4, len(tx)) if has_trig else 0   # trigger samples mixed into each batch
+        cl_sum = tot_sum = 0.0
+        n_batches = 0
         trig_correct = trig_total = 0
+        saw_task = False
         for _ in range(self.local_epochs):
-            # --- task pass on the (possibly reduced) local loader ---
             for x, y in self.loader:
+                saw_task = True
                 x, y = x.to(self.device), y.to(self.device)
+                if has_trig:
+                    sel = torch.randint(0, len(tx), (K,))
+                    xb = torch.cat([x, tx[sel].to(self.device)])
+                    yb = torch.cat([y, ty[sel].to(self.device)])
+                else:
+                    xb, yb = x, y
                 opt.zero_grad()
-                loss = F.cross_entropy(self.model(x), y,
-                                       label_smoothing=self.label_smoothing)
+                logits = self.model(xb)
+                loss = F.cross_entropy(logits, yb, label_smoothing=self.label_smoothing)
                 loss.backward()
                 if not torch.isfinite(loss):
                     opt.zero_grad(set_to_none=True); continue
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 opt.step()
                 cl_sum += float(loss.detach()); tot_sum += float(loss.detach()); n_batches += 1
+                if has_trig:
+                    with torch.no_grad():
+                        trig_correct += int((logits[-K:].argmax(1) == yb[-K:]).sum())
+                        trig_total += K
                 if self.meter is not None and self.meter._cur is not None:
                     self.meter.record_batch(len(x))
-            # --- trigger (backdoor) pass: CE to the target label ---
-            if has_trig:
+        # fallback: no task batches this round (e.g. trigger-only tap, cpc=0) -> triggers alone
+        if has_trig and not saw_task:
+            bs = 16
+            for _ in range(self.local_epochs):
                 perm = torch.randperm(len(tx))
                 for i in range(0, len(tx), bs):
                     idx = perm[i:i + bs]
                     xb, yb = tx[idx].to(self.device), ty[idx].to(self.device)
-                    opt.zero_grad()
-                    logits = self.model(xb)
-                    wml = wf.embed_loss(logits, yb)
-                    wml.backward()
+                    opt.zero_grad(); logits = self.model(xb)
+                    wml = wf.embed_loss(logits, yb); wml.backward()
                     if not torch.isfinite(wml):
                         opt.zero_grad(set_to_none=True); continue
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                    opt.step()
-                    wm_sum += float(wml.detach()); n_wm_batches += 1
-                    with torch.no_grad():
-                        trig_correct += int((logits.argmax(1) == yb).sum())
-                        trig_total += int(len(yb))
-                    if self.meter is not None and self.meter._cur is not None:
-                        self.meter.record_batch(len(xb))
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0); opt.step()
+                    trig_correct += int((logits.argmax(1) == yb).sum()); trig_total += int(len(yb))
+                    n_batches += 1
         if not hasattr(self, "wm_stats"):
             self.wm_stats = {}
         self.wm_stats[int(round_idx) if round_idx is not None else len(self.wm_stats)] = {
             "cls_loss": round(cl_sum / max(n_batches, 1), 5),
-            "wm_loss": round(wm_sum / max(n_wm_batches, 1), 5) if n_wm_batches else None,
+            "wm_loss": None,   # folded into the combined-batch CE (FedIPR alpha=1)
             "total_loss": round(tot_sum / max(n_batches, 1), 5),
             "trig_train_acc": round(trig_correct / trig_total, 4) if trig_total else None,
             "n_trigger_samples": int(trig_total),
@@ -739,8 +749,7 @@ class _SimpleFRMixin:
         """FedIPR analogue of _prepare: split the client's own trigger set into an
         embed slice + a held-out probe slice, and build a reduced task loader of
         N common-class images from the shard. The trigger images (not shard rows)
-        are what re-embeds the backdoor. Unlike FareMark there is no trigger
-        class to mask out of the shard."""
+        are what re-embeds the backdoor, no trigger class to mask out of the shard."""
         if getattr(self, "_prepared", False):
             return
         self._prepared = True
@@ -797,12 +806,12 @@ class _SimpleFRMixin:
     def _probe_ber(self, state) -> float | None:
         """BER of this client's mark in `state`, on held-out trigger images.
         used by the adaptive-tap free-rider to decide whether to coast or tap."""
-        if getattr(self, "wm_scheme", "faremark") == "fedipr": # FedIPR backdoor: probe on the held-out trigger images
+        if getattr(self, "wm_scheme", "faremark") == "fedipr":
             if getattr(self, "_probe_x", None) is None:
                 return None
-            self.model.load_state_dict(state) # load the model state to evaluate on the probe
+            self.model.load_state_dict(state)
             self.model.eval()
-            pred = self.model(self._probe_x.to(self.device)).argmax(dim=1).cpu() # predict on the probe images
+            pred = self.model(self._probe_x.to(self.device)).argmax(dim=1).cpu()
             acc = (pred == self._probe_y.cpu()).float().mean().item()
             return float(1.0 - acc)                       # ber = 1 - trigger acc
         if getattr(self, "_probe_x", None) is None:

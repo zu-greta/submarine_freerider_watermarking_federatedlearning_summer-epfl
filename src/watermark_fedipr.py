@@ -1,4 +1,4 @@
-"""FedIPR backdoor (black-box, output-read) watermark -- second output-layer scheme.
+"""FedIPR backdoor (black-box, output-read) watermark -- SECOND output-layer scheme.
 
 FedIPR paper's *backdoor* watermark (its Algorithm-3 `alpha * L_T` term)
 
@@ -114,8 +114,7 @@ def _pool_folder(n_total, in_channels, hw, seed, folder) -> torch.Tensor:
 
 
 def _pool_indist(n_total, in_channels, hw, seed, data_root, dataset) -> torch.Tensor:
-    """FedIPR IN-DISTRIBUTION triggers (repo prepare_wm_indistribution): real task-set
-    images relabeled to a secret target"""
+    """FedIPR IN-DISTRIBUTION triggers"""
     import torchvision
     from torchvision import transforms
     name = (dataset or "cifar100").lower()
@@ -141,6 +140,24 @@ def _pool_indist(n_total, in_channels, hw, seed, data_root, dataset) -> torch.Te
             x = x.mean(0, keepdim=True).expand(in_channels, -1, -1)
         xs.append(x)
     return torch.stack(xs).clamp(0, 1)
+
+
+_PATCH_PALETTE = [(1., 0., 0.), (0., 1., 0.), (0., 0., 1.), (1., 1., 0.), (1., 0., 1.),
+                  (0., 1., 1.), (1., 1., 1.), (1., .5, 0.), (.5, 0., 1.), (0., .5, .5)]
+
+
+def _stamp_patch_(x: torch.Tensor, cid: int, hw: int) -> None:
+    """In-place BadNets trigger: a per-client solid patch (distinct colour + corner)
+    on in-distribution images. The patch is the separable feature the model keys on,
+    so the mark embeds fast; the in-distribution base keeps it alive through BN eval.
+    Distinct per client so 10 clients' (patch -> label) maps don't collide."""
+    k = max(3, hw // 6)
+    corners = [(0, 0), (0, hw - k), (hw - k, 0), (hw - k, hw - k)]
+    r0, c0 = corners[cid % 4]
+    col = _PATCH_PALETTE[cid % len(_PATCH_PALETTE)]
+    C = x.shape[1]
+    for ch in range(C):
+        x[:, ch, r0:r0 + k, c0:c0 + k] = col[ch] if C == 3 else float(sum(col) / 3.0)
 
 
 def build_trigger_pool(source, n_total, in_channels, hw, seed,
@@ -184,10 +201,15 @@ def build_client_triggersets(cids, num_trigger, num_classes, dataset,
     per = max(1, int(num_trigger))
     pool = build_trigger_pool(source, per * len(cids), in_channels, hw, seed,
                               data_root=data_root, folder=folder, dataset=dataset)
-    pool = _normalize(pool, dataset)
+    # in-distribution triggers get a per-client BadNets patch (applied on [0,1] images,
+    # BEFORE normalization) so the mark is separable and embeds; OOD sources are used raw.
+    patch = ((source or "indist").lower() == "indist")
     out = {}
     for j, cid in enumerate(cids):
         x = pool[j * per:(j + 1) * per].clone()
+        if patch:
+            _stamp_patch_(x, cid, hw)
+        x = _normalize(x, dataset)
         tgt = _target_label(cid, num_classes, target_mode, seed)
         y = torch.full((x.shape[0],), tgt, dtype=torch.long)
         out[cid] = {"x": x, "y": y, "target": tgt}
