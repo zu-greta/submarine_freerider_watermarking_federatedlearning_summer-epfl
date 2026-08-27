@@ -54,6 +54,16 @@ phase_probe(){
       ./submit_experiment.sh 11 0
 }
 
+phase_probe_fedipr(){
+  # FedIPR honest gate: a short honest run must embed the backdoor (ber = 1-trigacc LOW).
+  echo ">>> FEDIPR PREFLIGHT: ${PROBE_ROUNDS:-6} honest rounds (indist), assert honest ber < ${FPROBE_MAX:-0.2}"
+  WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE="${FEDIPR_TRIGGER_SOURCE:-indist}" \
+    FEDIPR_NUM_TRIGGER="${FEDIPR_NUM_TRIGGER:-40}" FEDIPR_TARGET_MODE="${FEDIPR_TARGET_MODE:-cid}" \
+    ATTACK=none NUM_FREE_RIDERS=0 ROUNDS="${PROBE_ROUNDS:-6}" FAMILY=fedipr_probe \
+    NOTE="fedipr preflight honest (indist)" ./submit_experiment.sh 14 0
+  python ../scripts/preflight_fedipr.py --in "$RES/fedipr_probe_rep0/result.json" --max "${FPROBE_MAX:-0.2}"
+}
+
 phase_manifest(){
   echo ">>> MANIFEST: groups=[$BATCH] PAPER_OK=$PAPER_OK FAST_DATA=$FAST_DATA DETERMINISM=$DETERMINISM"
   rm -f jobs.tsv
@@ -240,7 +250,6 @@ phase_plot(){
 
   # ===================== GROUP F -- FedIPR backdoor (2nd output-layer scheme) ==
   # Mirror of A(honest) + H(controls) + K(submarine) + L(graftblock) for the FedIPR
-  # trigger-set watermark. Detection is ber_fedipr = 1 - trigger_set_accuracy
   # c36 => free-riders on cids 3,6 (target labels 3,6) ; c17 => cids 1,7 (labels 1,7).
 
   # -- honest baseline (calibration source + per-class floor) --
@@ -291,7 +300,8 @@ phase_grade(){
 }
 
 case "${1:-help}" in
-  probe)     phase_probe ;;
+  probe)         phase_probe ;;
+  probe-fedipr)  phase_probe_fedipr ;;
   manifest)  phase_manifest ;;
   submit)    phase_submit ;;
   monitor)   phase_monitor ;;
@@ -303,7 +313,8 @@ case "${1:-help}" in
 runbook.sh -- run phases 
 
   ON THE CLUSTER (has submit_experiment.sh + .env):
-    ./runbook.sh probe       0. embedding sanity
+    ./runbook.sh probe          0. FareMark embedding sanity
+    ./runbook.sh probe-fedipr   0b. FedIPR honest gate (asserts honest ber < 0.2; run before BATCH=F)
     ./runbook.sh manifest    1. build jobs.tsv     (BATCH=$BATCH)
     ./runbook.sh submit      2. run the pool       (PODS=$PODS WORKERS=$WORKERS)
     ./runbook.sh monitor     3. progress

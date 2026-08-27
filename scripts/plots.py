@@ -70,6 +70,19 @@ LBL_ROUND      = "communication round"
 LBL_BER        = "bit-error-rate  (0 = mark present · 0.5 = no mark)"
 LBL_BER_SHORT  = "bit-error-rate"
 LBL_BER_HONEST = "honest bit-error-rate"
+
+# Output-layer scheme -> BER axis semantics.
+#   faremark: bit-error-rate, chance (no mark) = 0.5.
+#   fedipr  : ber = 1 - trigger_accuracy, so "no mark" = 1 - 1/num_classes (~0.99).
+# Set via --scheme fedipr; labels are reassigned in main().
+SCHEME = "faremark"
+NOMARK = 0.5
+
+def _nomark(ax):
+    """FedIPR only: draw the 'no watermark' reference (trigger acc at chance)."""
+    if SCHEME == "fedipr":
+        ax.axhline(NOMARK, color="#888888", ls=(0, (1, 1)), lw=1.4, zorder=1,
+                   label=f"no mark (chance) = {NOMARK:.2f}")
 LBL_TRIGACC    = "honest trigger-class test acc\n(argmax == trigger class)"
 LBL_TESTACC    = "global test accuracy (%)"
 LBL_SAMPLES    = "cumulative samples"
@@ -411,6 +424,7 @@ def honest_per_round(a):
             axB.fill_between(rr, mean - std, mean + std, color=col, alpha=.12)
     axB.axhline(eta_t, color="black", ls="--", lw=1.8, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
     axB.axhline(eta_l, color=C_HONEST, ls=(0, (5, 2)), lw=1.8, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
+    _nomark(axB)
     axB.set_ylabel(LBL_BER_HONEST); axB.set_ylim(-0.03, 0.6); axB.grid(alpha=.3)
     axB.set_title(f"{TITLE_PER_ROUND}  ·  {famname}  ·  {nseed} seed(s)")   # TEXT
     axB.legend(fontsize=7.5, ncol=2, loc="upper right", framealpha=.9)
@@ -780,6 +794,7 @@ def timeline(a):
         ax.axvline(W - 0.5, color=GREY, ls="--", lw=1.6)
     ax.axhline(eta_t, color=BLACK, ls="--", lw=2.2, label=f"{LBL_ETA_TIGHT} (frozen) = {eta_t:.3f}")
     ax.axhline(eta_l, color="#3B6FB5", ls=(0, (5, 2)), lw=2.0, label=f"{LBL_ETA_LOOSE} (ref) = {eta_l:.3f}")
+    _nomark(ax)
 
     # --- adaptive free-rider self-bookkeeping overlay (submarine K/J only) ---------
     # Shows WHY it taps: the FR's self-probed BER vs its own frozen target (probe>target
@@ -1275,6 +1290,7 @@ def tap_perfr(a):
 
             ax.axhline(eta_l, color=C_HONEST, ls="--", lw=1.7, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
             ax.axhline(eta_t, color="black", ls=":", lw=1.3, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
+            _nomark(ax)
             # the FR's OWN frozen threshold η̂ and tap target (probe>target ⇒ tap)
             if data[cid]["eta_est"] is not None:
                 ax.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.5,
@@ -2137,7 +2153,19 @@ def main():
         s.add_argument("--warmup", type=int, default=None, help="free-riding start round (iso_pair marker).")
         s.add_argument("--no_fr_indiv", action="store_true",
                        help="timeline: hide the thin per-client FR lines (auto-on for H* families).")
+        s.add_argument("--scheme", choices=["faremark", "fedipr"], default="faremark",
+                       help="output-layer scheme: FedIPR sets ber=1-trigacc axis semantics "
+                            "(no-mark ~0.99 instead of 0.5).")
+        s.add_argument("--nomark", type=float, default=None,
+                       help="fedipr no-mark reference level (default 1-1/num_classes ~0.99).")
     a = ap.parse_args()
+    global SCHEME, NOMARK, LBL_BER, LBL_BER_SHORT, LBL_BER_HONEST
+    if getattr(a, "scheme", "faremark") == "fedipr":
+        SCHEME = "fedipr"
+        NOMARK = a.nomark if a.nomark is not None else 0.99
+        LBL_BER        = "detection BER  (0 = mark present · ~1 = no mark)  [1 - trigger acc]"
+        LBL_BER_SHORT  = "detection BER"
+        LBL_BER_HONEST = "honest detection BER  (1 - trigger acc)"
     if a.inp is None and a.cmd not in ("dirichlet_dist", "iso_pair", "iso_acc", "iso_compare"):
         ap.error(f"{a.cmd} needs --in")
     if a.out is None and a.inp:

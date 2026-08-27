@@ -1,6 +1,5 @@
-"""FedIPR backdoor (black-box, output-read) watermark -- extra output-layer scheme.
+"""FedIPR backdoor (black-box, output-read) watermark -- second output-layer scheme.
 
-This is the box-black counterpart to src/watermark.py (FareMark). It is the
 FedIPR paper's *backdoor* watermark (its Algorithm-3 `alpha * L_T` term)
 
 Mechanism (FedIPR, Li et al. 2022; repo purp1eHaze/FedIPR utils/datasets.py):
@@ -20,7 +19,8 @@ FedIPR statistic as
 
         ber_fedipr := 1 - trigger_set_accuracy
 
-Honest client -> trigger acc ~1 -> ber ~0.  Free-rider -> trigger acc ~1/C -> ber ~ (1 - 1/C).  
+Honest client -> trigger acc ~1 -> ber ~0.  Free-rider -> trigger acc ~1/C ->
+ber ~ (1 - 1/C).  Nothing downstream needs to know how the scalar was produced.
 -------------------------------------------------------------------------------
 """
 from __future__ import annotations
@@ -29,7 +29,9 @@ import os
 import torch
 import torch.nn.functional as F
 
-# same per-dataset normalization the task inputs use (src/datasets.py:_NORM)
+# same per-dataset normalization the task inputs use (src/datasets.py:_NORM), so
+# an OOD trigger image is presented to the model in the same input space it was
+# trained in -- this is exactly what the repo's prepare_wm does (CIFAR mean/std).
 _NORM = {
     "mnist": ((0.1307,), (0.3081,)),
     "cifar10": ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
@@ -71,8 +73,16 @@ def _pool_svhn(n_total, in_channels, hw, seed, data_root) -> torch.Tensor:
     import torchvision
     from torchvision import transforms
     tf = transforms.Compose([transforms.Resize((hw, hw)), transforms.ToTensor()])
-    ds = torchvision.datasets.SVHN(root=os.path.join(data_root, "svhn"),
-                                   split="test", download=True, transform=tf)
+    root = os.path.join(data_root, "svhn")
+    try:
+        ds = torchvision.datasets.SVHN(root=root, split="test",
+                                       download=True, transform=tf)
+    except Exception as e:
+        raise RuntimeError(
+            f"FedIPR trigger source 'svhn' could not be loaded from {root!r} "
+            f"({type(e).__name__}: {e}). The pod has no SVHN and could not download it. "
+            f"Fix: pre-stage test_32x32.mat into {root}/ (needs scipy in the image), OR "
+            f"run with FEDIPR_TRIGGER_SOURCE=noise (self-contained, no download).") from e
     g = torch.Generator().manual_seed(int(seed) + 424242)
     idx = torch.randperm(len(ds), generator=g)[:n_total].tolist()
     xs = []
@@ -103,9 +113,41 @@ def _pool_folder(n_total, in_channels, hw, seed, folder) -> torch.Tensor:
     return torch.stack(xs).clamp(0, 1)
 
 
+def _pool_indist(n_total, in_channels, hw, seed, data_root, dataset) -> torch.Tensor:
+    """FedIPR IN-DISTRIBUTION triggers (repo prepare_wm_indistribution): real task-set
+    images relabeled to a secret target"""
+    import torchvision
+    from torchvision import transforms
+    name = (dataset or "cifar100").lower()
+    tf = transforms.Compose([transforms.ToTensor()])
+    root = data_root or "."
+    if name == "cifar100":
+        ds = torchvision.datasets.CIFAR100(root, train=False, download=True, transform=tf)
+    elif name == "cifar10":
+        ds = torchvision.datasets.CIFAR10(root, train=False, download=True, transform=tf)
+    elif name == "mnist":
+        ds = torchvision.datasets.MNIST(root, train=False, download=True, transform=tf)
+    else:
+        return _pool_noise(n_total, in_channels, hw, seed)
+    g = torch.Generator().manual_seed(int(seed) + 20240607)
+    idx = torch.randperm(len(ds), generator=g)[:n_total].tolist()
+    xs = []
+    for i in idx:
+        x, _ = ds[i]                                   # [C,H,W] in [0,1], true label discarded
+        if x.shape[-1] != hw:
+            x = F.interpolate(x.unsqueeze(0), size=(hw, hw), mode="bilinear",
+                              align_corners=False).squeeze(0)
+        if x.shape[0] != in_channels:
+            x = x.mean(0, keepdim=True).expand(in_channels, -1, -1)
+        xs.append(x)
+    return torch.stack(xs).clamp(0, 1)
+
+
 def build_trigger_pool(source, n_total, in_channels, hw, seed,
-                       data_root=None, folder=None) -> torch.Tensor:
-    src = (source or "noise").lower()
+                       data_root=None, folder=None, dataset=None) -> torch.Tensor:
+    src = (source or "indist").lower()
+    if src == "indist":
+        return _pool_indist(n_total, in_channels, hw, seed, data_root or ".", dataset)
     if src == "noise":
         return _pool_noise(n_total, in_channels, hw, seed)
     if src == "svhn":
@@ -115,7 +157,7 @@ def build_trigger_pool(source, n_total, in_channels, hw, seed,
             raise ValueError("fedipr_trigger_source='folder' needs fedipr_trigger_dir=<path>")
         return _pool_folder(n_total, in_channels, hw, seed, folder)
     raise ValueError(f"unknown fedipr_trigger_source '{source}' "
-                     f"(use 'noise' | 'svhn' | 'folder').")
+                     f"(use 'indist' | 'noise' | 'svhn' | 'folder').")
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +183,7 @@ def build_client_triggersets(cids, num_trigger, num_classes, dataset,
     cids = sorted(set(int(c) for c in cids))
     per = max(1, int(num_trigger))
     pool = build_trigger_pool(source, per * len(cids), in_channels, hw, seed,
-                              data_root=data_root, folder=folder)
+                              data_root=data_root, folder=folder, dataset=dataset)
     pool = _normalize(pool, dataset)
     out = {}
     for j, cid in enumerate(cids):
