@@ -5,8 +5,30 @@ Implemented: ResNet-18 + tiny SmallCNN for fast smoke tests
 ShuffleNet / GoogleNet are to be added later via `build_model`
 Tested: ResNet-18 on CIFAR-100
 
-NOTE: adapted for small images (28x28 / 32x32). 
+NOTE: adapted for small images (28x28 / 32x32).
 torchvision ResNet-18 is built for 224x224 ImageNet inputs - took the standard adaptation of CIFAR ResNet
+
+-------------------------------------------------------------------------------
+NOTE - Model Architecture and scope mapping
+-------------------------------------------------------------------------------
+Output layer watermarking lives in the softmax layer. The scope maps in 
+AdaptiveTapFreeRider / GraftBlockFreeRider (`_SCOPE_KEEP`) count *named parameter 
+tensors from the end* of this exact model:
+
+  This ResNet-18 (CIFAR stem) has 62 named parameter tensors (~11.2M scalars).
+  named_parameters() order is registration order, so the LAST tensors are:
+        ... layer4.1.conv2.weight,
+            layer4.1.bn2.weight, layer4.1.bn2.bias,
+            fc.weight, fc.bias
+  scope "head2"  = keep 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
+                              fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
+                              = the softmax/output fc + the conv right before it.
+  scope "block2" = keep 20 -> last ~2.5 residual blocks + fc, ~9.04M scalars (~80%).
+  scope "head"   = keep 2  -> [fc.weight, fc.bias] only.
+  scope "full"   = keep all (identical to the honest path).
+
+If you swap in a different backbone, re-derive `_SCOPE_KEEP` for it 
+- the head2/block2 offsets are model-specific.
 """
 import torch.nn as nn
 import torchvision

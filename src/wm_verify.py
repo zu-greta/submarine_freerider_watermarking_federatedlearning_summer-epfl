@@ -15,6 +15,7 @@ import torch
 import torch.nn.functional as F
 
 from . import watermark as wm
+from . import watermark_fedipr_sign as wfs          
 
 
 class WatermarkRegistry:
@@ -22,7 +23,7 @@ class WatermarkRegistry:
 
     def __init__(self):
         self.entries: dict[int, dict] = {}
-        self.scheme = "faremark"      # "faremark" | "fedipr" (which verifier branch to use)
+        self.scheme = "faremark"      # "faremark" | "fedipr" | "fedipr_sign" (verifier branch)
         # filled in by build_watermarked_clients for self-documenting results:
         self.m = None                 # number of watermark bits per client
         self.l = None                 # group size (n//m or (n-1)//m)
@@ -30,6 +31,7 @@ class WatermarkRegistry:
         self.trigger_assign = "roundrobin"   # assignment policy actually used
         self.trigger_holdings = {}    # cid -> #images of its trigger class in its shard
         self.shard_sizes = {}         # cid -> total shard size
+        self.sign_carrier = None      # fedipr_sign: the carrier scale param name (output layer)
 
     def register(self, cid, trigger_class, key, target_bits, kind="power",
                  alpha=0.4, exclude="trigger"):
@@ -46,6 +48,17 @@ class WatermarkRegistry:
         self.entries[cid] = dict(trigger_class=int(target_label), kind="fedipr",
                                  alpha=None, exclude=None,
                                  trig_x=trig_x, trig_y=trig_y,
+                                 # placeholders so any faremark-shaped reader is safe
+                                 key=None, target_bits=None)
+
+    def register_fedipr_sign(self, cid, trigger_class, sign_E, sign_bits, carrier):
+        """FedIPR feature-based sign entry (WHITE-BOX): the client's secret embedding
+        matrix E_k, target bits B_k, and the carrier scale param name. The verifier
+        reads `carrier` from the submitted weights and checks sign(gamma . E) vs B."""
+        self.scheme = "fedipr_sign"
+        self.entries[cid] = dict(trigger_class=int(trigger_class), kind="fedipr_sign",
+                                 alpha=None, exclude=None,
+                                 sign_E=sign_E, sign_bits=sign_bits, carrier=carrier,
                                  # placeholders so any faremark-shaped reader is safe
                                  key=None, target_bits=None)
 
@@ -177,6 +190,21 @@ def make_verifier(registry, trigger_bank, verify_model, device,
                              "pmax": round(pmax.mean().item(), 4),
                              "entropy": round(ent, 4),
                              "dominance": None}
+                measured.append((cid, ber, cid in fr_set, tc))
+                continue
+            # ================================================
+
+            # ======= FedIPR feature-based sign branch (WHITE-BOX) =======
+            # Read the carrier scale straight from the submitted weights (NO forward
+            # pass), extract sign(gamma . E) and compare to B_k. ber = Hamming/N.
+            if scheme == "fedipr_sign":
+                ber = wfs.sign_ber_from_state(state, entry["carrier"],
+                                              entry["sign_E"], entry["sign_bits"],
+                                              device=device)
+                if ber is None:
+                    continue
+                diag[cid] = {"trig_acc": round(1.0 - ber, 4),   # 1 - sign BER (mark present-ness)
+                             "pmax": None, "entropy": None, "dominance": None}
                 measured.append((cid, ber, cid in fr_set, tc))
                 continue
             # ================================================

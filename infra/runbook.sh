@@ -19,16 +19,29 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
 
+# ===================== DATASET SWITCH =====================
+# The whole run (manifest -> submit -> plot) uses this dataset
+#   cifar100 (default) | cifar10 | mnist
+#   food101  = ETH-Zurich Food-101 (101 cls, torchvision auto-download ~5 GB)
+export DATASET="${DATASET:-cifar100}"
+export FOOD_SIZE="${FOOD_SIZE:-64}"        # Food-101 input resolution (food101 only)
+
 # ---- batch selection --------------------------------------------------------
 # Default = A
-BATCH="${BATCH:-A}"   # whole tokens, space/comma separated: "H T EA" 
+BATCH="${BATCH:-A}"   # whole tokens, space/comma separated: "H T EA"
 PAPER_OK="${PAPER_OK:-0}"          # 1 = also build probe-gated paper rows (grade phase)
 FAST_DATA="${FAST_DATA:-1}"        # 1 = GPU-resident loaders (kills DataLoader fork storms)
 DETERMINISM="${DETERMINISM:-0}"    # 0 = cuDNN autotuner on (~1.3-2x; stat. identical over seeds)
 PODS="${PODS:-2}"; WORKERS="${WORKERS:-6}"
 MPS="${MPS:-1}"
 
-RES="${RES:-/mnt/nfs/home/zu/results}"   # cluster results (submit) OR local dir (plot)
+# Per-dataset results tree. cifar100 keeps the original flat path (back-compat); other
+# datasets get their own subtree (matches submit_experiment.sh's OUTPUT_DIR).
+if [ "$DATASET" = "cifar100" ]; then
+  RES="${RES:-/mnt/nfs/home/zu/results}"
+else
+  RES="${RES:-/mnt/nfs/home/zu/results/$DATASET}"
+fi
 OUT="${OUT:-$RES/figs}"
 ALL="$RES/*/result.json"
 
@@ -37,11 +50,16 @@ HON=A1_honest_c100                 # honest calibration family (IID, c100, 10 cl
 HONCLASS="${HONCLASS:-A1_honest_c100}"   # all-honest family for the class-acc bar chart
 ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose
 ETA_T_NIID="0.161"; ETA_L_NIID="0.576"   # non-IID eta tight / loose
-# ---- FedIPR (group F) frozen references ----
+# ---- FedIPR backdoor (group F) frozen references ----
 HON_FI="${HON_FI:-F_A1_honest_c100_fi}"        # FedIPR honest calibration family (IID, c100)
 # ber_fedipr = 1 - trigger_acc; honest floor ~ 0. These are PROVISIONAL -- recalibrate
 # eta_tight = mu+3sigma of F_A1 honest ber (like ETA_T=0.064 for FareMark), then set here.
 ETA_T_FI="${ETA_T_FI:-0.20}"; ETA_L_FI="${ETA_L_FI:-0.50}"   # FedIPR eta tight / loose
+# ---- FedIPR SIGN / white-box (group G) frozen references ----
+HON_WS="${HON_WS:-G_A1_honest_c100_ws}"        # FedIPR-sign honest calibration family (IID, c100)
+# ber_sign = Hamming(sign(gamma.E),B)/N; honest floor ~ 0, chance = 0.5 (like FareMark).
+# PROVISIONAL -- recalibrate eta_tight = mu+3sigma of G_A1 honest ber, then set here.
+ETA_T_WS="${ETA_T_WS:-0.20}"; ETA_L_WS="${ETA_L_WS:-0.50}"   # FedIPR-sign eta tight / loose
 
 PL="python ../scripts/plots.py"   
 PC="python ../scripts/paper_check.py"
@@ -289,7 +307,43 @@ phase_plot(){
   for fam in $F_C36 $F_C17; do FFR="$FFR '$RES/${fam}_rep*/result.json'"; done
   run "$PL overlap --in '$ALL' --families $HON_FI --fr_in $FFR --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --tail 20 --out $OUT/F_overlap_band_vs_fr"
 
-  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr)"
+  # ===================== GROUP G -- FedIPR SIGN (3rd scheme, WHITE-BOX) =======
+  # Mirror of F for the feature-based sign watermark forced into the output layer.
+  # Same figures (BER is scheme-agnostic); chance = 0.5 like FareMark (NOT 1-1/C).
+  # -- honest baseline (calibration source + per-bit floor) --
+  run "$PL honest_lines     --in '$ALL' --family $HON_WS --tail 20 --out $OUT/G_A1_class_floors"
+  run "$PL honest_per_round --in '$ALL' --family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_A1_honest_per_round"
+  # -- positive controls (MUST be caught: sign ber ~ 0.5 chance) --
+  run "$PL timeline --in '$ALL' --family G_H5_prevmodel_c100_ws --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_H5_prevmodel_timeline"
+  run "$PL timeline --in '$ALL' --family G_H6_gaussian_c100_ws  --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_H6_gaussian_timeline"
+  # -- submarine (K) + graftblock (L) attack families --
+  G_C36="G_K9_alldyn_head2_c36_ws G_K4_alldyn_block2_c36_ws G_L1_graftblock_head2_c36_ws"
+  G_C17="G_K9_alldyn_head2_c17_ws G_K4_alldyn_block2_c17_ws G_L5_graftblock_head2_c17_ws"
+  for fam in $G_C36 $G_C17; do
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/tap_perfr_${fam}"
+    run "$PL tap_perseed --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/tap_perseed_${fam}"
+    run "$PL tap_effort  --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/tap_effort_${fam}"
+    run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_WS --out $OUT/accuracy_${fam}"
+    run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/timeline_${fam}"
+  done
+  # isolated same-class twin (honest from G_A1): c36 families at cls 3,6 ; c17 at cls 1,7
+  for fam in $G_C36; do
+    for cls in 3 6; do
+      run "$PL iso_pair --honest_in '$RES/${HON_WS}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  for fam in $G_C17; do
+    for cls in 1 7; do
+      run "$PL iso_pair --honest_in '$RES/${HON_WS}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/iso_${fam}_c${cls}"
+    done
+  done
+  # the money plot: honest per-bit band vs ALL FedIPR-sign FR operating points on one axis.
+  GFR=""
+  for fam in $G_C36 $G_C17; do GFR="$GFR '$RES/${fam}_rep*/result.json'"; done
+  run "$PL overlap --in '$ALL' --families $HON_WS --fr_in $GFR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_overlap_band_vs_fr"
+
+  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box)"
 }
 
 phase_grade(){
@@ -324,8 +378,9 @@ runbook.sh -- run phases
     RES=~/local/results ./runbook.sh plot     4. ALL figures
     RES=~/local/results ./runbook.sh grade    5. paper tables (optional)
 
-  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F .
-     (F = FedIPR backdoor, the 2nd output-layer scheme: BATCH=F ./runbook.sh manifest)
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G .
+     (F = FedIPR backdoor, 2nd output-layer scheme; G = FedIPR SIGN white-box, 3rd
+      scheme, mark forced into the output layer: BATCH=G ./runbook.sh manifest)
 USAGE
     ;;
 esac

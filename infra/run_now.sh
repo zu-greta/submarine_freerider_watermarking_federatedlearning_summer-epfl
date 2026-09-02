@@ -20,17 +20,26 @@
 #   L  graftblock free-rider (last-block-only) - 1,7 and 3,6
 #   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
 #   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6)
-#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr.     
+#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr.
+#   G  FedIPR SIGN (3rd scheme, WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, mark in the
+#      OUTPUT-LAYER scale (auto_last_bn, in head2), read white-box. Free-rider trains only head2.
 #
 # =============================================================================
 set -uo pipefail
+# ===================== DATASET SWITCH (decide once, here) =====================
+# Every family below runs on THIS dataset. Choices:
+#   cifar100 (default) | cifar10 | mnist | food101 (ETH-Zurich Food-101, auto-download)
+#   
+# It is exported, so every `env ... ./submit_experiment.sh` call inherits it and adds `--dataset $DATASET`
+export DATASET="${DATASET:-cifar100}"
+export FOOD_SIZE="${FOOD_SIZE:-64}"           # Food-101 input resolution (only used for food101)
 export DRYRUN=1 JOBS_FILE="${JOBS_FILE:-jobs.tsv}"
 export NUM_WORKERS="${NUM_WORKERS:-0}"
 WANT="${1:-A}"
 PAPER_OK="${PAPER_OK:-0}"
 rm -f "$JOBS_FILE"
 WANT=" ${WANT//,/ } "
-echo "== building $JOBS_FILE  groups=[${WANT# }]  PAPER_OK=$PAPER_OK  NUM_WORKERS=$NUM_WORKERS =="
+echo "== building $JOBS_FILE  groups=[${WANT# }]  dataset=$DATASET  PAPER_OK=$PAPER_OK  NUM_WORKERS=$NUM_WORKERS =="
 has(){ [[ "$WANT" == *" $1 "* ]]; }
 
 # ---------------------------------------------------------------------------
@@ -485,6 +494,72 @@ if has F; then
         FAMILY="F_K4_alldyn_block2_c36_fi" NOTE="F_K4 FedIPR submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
     env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
         FAMILY="F_K4_alldyn_block2_c17_fi" NOTE="F_K4 FedIPR submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
+  done
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP G -- FedIPR feature-based SIGN watermark = the THIRD (WHITE-BOX) scheme.
+#   Same story as F but the mark is embedded in the SIGNS of the OUTPUT-LAYER
+#   scale (auto_last_bn, inside head2) and read WHITE-BOX from the weights.
+#   Mirrors A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, under
+#   WM_SCHEME=fedipr_sign. Free-rider trains ONLY head2 (which contains the carrier)
+#   -> re-embeds its own bits -> ber ~ 0 -> evades, exactly like the black-box marks.
+#   ber_sign = Hamming(sign(gamma.E), B)/N ; honest ~ 0, chance = 0.5 (like FareMark).
+#   eta: recalibrate from G_A1_honest (honest ber ~ 0). GS_ETA is provisional.
+# ---------------------------------------------------------------------------
+if has G; then
+  SEEDS_G="${SEEDS_G:-0 1 2}"
+  GI="WM_SCHEME=fedipr_sign FEDIPR_SIGN_BITS=${FEDIPR_SIGN_BITS:-40} \
+      FEDIPR_SIGN_MARGIN=${FEDIPR_SIGN_MARGIN:-0.1} FEDIPR_SIGN_LAMBDA=${FEDIPR_SIGN_LAMBDA:-1.0} \
+      FEDIPR_SIGN_CARRIER=${FEDIPR_SIGN_CARRIER:-auto_last_bn}"
+  GSETA="${FEDIPR_SIGN_ETA:-0.20}"
+
+  # G_A1 -- honest baseline (calibration source + honest floor). No eta (calib run).
+  for s in 0 1 2 3 4 5; do
+    env $GI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+        FAMILY="G_A1_honest_c100_ws" NOTE="G_A1 FedIPR-sign honest baseline (calibration)" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # G_H5 / G_H6 -- positive controls (MUST be caught: sign ber ~ 0.5 chance).
+  for s in 0 1 2; do
+    env $GI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=$GSETA ROUNDS=50 \
+        FAMILY="G_H5_prevmodel_c100_ws" NOTE="G_H5 FedIPR-sign previous-models control" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  for s in 0 1 2; do
+    env $GI ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=$GSETA ROUNDS=50 \
+        FAMILY="G_H6_gaussian_c100_ws" NOTE="G_H6 FedIPR-sign gaussian-noise control" \
+        ./submit_experiment.sh 14 "$s"
+  done
+  # G_L1 / G_L5 -- graftblock head2 (MAIN attack): re-embed the sign bits using only
+  #   head2 (which holds the output-layer carrier), on cpc5 task data.
+  gbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
+         AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=$GSETA"
+  for s in $SEEDS_G; do
+    env $GI $gbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
+        FAMILY="G_L1_graftblock_head2_c36_ws" \
+        NOTE="G_L1 FedIPR-sign graftblock head2 (hard 3,6)" ./submit_experiment.sh 14 "$s"
+    env $GI $gbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
+        FAMILY="G_L5_graftblock_head2_c17_ws" \
+        NOTE="G_L5 FedIPR-sign graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
+  done
+  # G_K9 / G_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
+  gkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+          AUTOP_ORACLE_ETA=$GSETA WM_ETA_FIXED=$GSETA TAP_DATA_CPC=5 \
+          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+          TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+          TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
+  for s in $SEEDS_G; do
+    env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
+        FAMILY="G_K9_alldyn_head2_c36_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
+    env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
+        FAMILY="G_K9_alldyn_head2_c17_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
+    env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
+        FAMILY="G_K4_alldyn_block2_c36_ws" NOTE="G_K4 FedIPR-sign submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
+    env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
+        FAMILY="G_K4_alldyn_block2_c17_ws" NOTE="G_K4 FedIPR-sign submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
   done
 fi
 

@@ -64,14 +64,26 @@ class ExpConfig:
     # ---- watermarking ----
     watermark: bool = False
     # which OUTPUT-LAYER watermark scheme to embed/verify:
-    #   "faremark" (default) = box-free softmax-projection BER scheme (src/watermark.py)
-    #   "fedipr"             = FedIPR backdoor trigger-set scheme (src/watermark_fedipr.py)
+    #   "faremark"    (default) = box-free softmax-projection BER scheme (src/watermark.py)
+    #   "fedipr"                = FedIPR backdoor trigger-set scheme (src/watermark_fedipr.py)
+    #   "fedipr_sign"           = FedIPR feature-based sign watermark (WHITE-BOX),
+    #                             FORCED into the output layer (src/watermark_fedipr_sign.py)
     wm_scheme: str = "faremark"
     # ---- FedIPR backdoor knobs ----
     fedipr_num_trigger: int = 40            # trigger images per client (repo default 40)
     fedipr_trigger_source: str = "indist"   # "indist" (real task imgs, BN-robust; default) | "svhn"/"noise" (OOD) | "folder"
     fedipr_trigger_dir: str = ""            # image folder when fedipr_trigger_source="folder"
     fedipr_target_mode: str = "cid"         # target label: "cid" (cid%%n) | "fixed" (=5) | "random"
+    # ---- FedIPR feature-based SIGN watermark knobs (wm_scheme="fedipr_sign", WHITE-BOX) ----
+    # The sign string is embedded in the SIGNS of a carrier scale vector and read
+    # white-box from the weights. The carrier is a SERVER CHOICE -> forces the layer.
+    fedipr_sign_bits: int = 40              # N: bits per client. Keep K*N <= carrier channels
+                                            #    (10 clients * 40 = 400 <= 512 -> feasible, low honest floor)
+    fedipr_sign_margin: float = 0.1         # hinge margin mu in the FedIPR sign-loss (Eq. 19)
+    fedipr_sign_lambda: float = 1.0         # weight of the sign-loss added to the task loss
+    fedipr_sign_carrier: str = "auto_last_bn"  # carrier scale param. "auto_last_bn" = the OUTPUT-layer
+                                            #    scale (last BN, inside head2). A specific name (e.g.
+                                            #    "net.bn1.weight") forces a body layer -> robust contrast.
     wm_bits: int = 0                        # m; 0 -> auto
     wm_balanced_keys: bool = False          # False = random +/-1 keys. True = sign-balanced rows 
     wm_trigger_assign: str = "roundrobin"   # trigger-class -> client assignment policy:
@@ -167,9 +179,16 @@ CONFIGS = [
               num_clients=10, watermark=True, wm_lambda=5.0, wm_beta=0.6,
               attack="adaptive_tap", num_free_riders=2,
               expected_acc=(0.0, 100.0)),
+
+    # 15: Food-101 attack base (== config 14 but dataset=food101, 101 classes)
+    ExpConfig("attack_base_resnet18_food101", "resnet18", "food101",
+              num_clients=10, watermark=True, wm_lambda=5.0, wm_beta=0.6,
+              attack="adaptive_tap", num_free_riders=2,
+              expected_acc=(0.0, 100.0)),
 ]
 
-ATTACK_BASE_IDX = 14   # convenience for scripts
+ATTACK_BASE_IDX = 14        # convenience for scripts
+FOOD101_ATTACK_BASE_IDX = 15   # Food-101 (ETH-Zurich); or override cfg 14 with DATASET=food101
 SUBMARINE_IDX = ATTACK_BASE_IDX   # back-compat alias
 AUTOPILOT_IDX = ATTACK_BASE_IDX   # back-compat alias
 

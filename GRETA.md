@@ -684,6 +684,30 @@ implement the fedipr - last layer watermark
 
 watermark loss or total loss - difficult class meaning -> send c explanation table
 
+#### September 2
+NOTES:
+- fedipr:
+    - black box watermarking method - uses a trigger set to embed a watermark in the model. the watermark is read out from the output layer of the model. - FR can nudge the model output layer which is the layer that decides the mapping of input to output . whether trigger sample comes out as the secret label or not depends on the last layers that map feature->decision (features are embedded richly from global and other client training). FR nudge the head to force its own triggers to its own labels
+    - white box watermarking method - uses a feature based approach to embed a watermark in the model. the watermark is embedded in different layers of the model to spread out the watermark. but here we force it into the output layer to prove our point that the output layer is a weak point for watermarking.
+- implemented the fedipr backdoor watermarking method. ran experiments - works
+    - backdoor: 40 trigger samples labelled weirdly to be memorised by the model - free rider mems in the last output layer where the watermark is read out from the output layer - FR can escape detection
+- implemented the fedipr white box watermarking method - did not run expeirments (kicked out)
+    - feature based: fedipr embeds in diff layers to spread out - but here forced into output layer to prove our point. this should prove the location as output layer is the weak point
+
+MEETING NOTES:
+- [x] check last layer
+- main fig: fig3 for both models with the cost - accuracy and overhead
+- table 1 with compute
+- fig2 with gaussian and prev and ours
+- fig3 final BER vs. num layers for fedipr -> training more layers to show that the output layer is the weak point for watermarking
+- fig4 on faremark - classid and final BER
+
+have a paragraph that we ignore threshold
+
+have the plots for next week
+fedipr with more layers
+food-100
+
 ---
 
 -> paper notes

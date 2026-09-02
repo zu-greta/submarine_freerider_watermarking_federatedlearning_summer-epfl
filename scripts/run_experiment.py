@@ -88,9 +88,11 @@ def parse_args():
     p.add_argument("--watermark", dest="watermark", action="store_true", default=None)
     p.add_argument("--no_watermark", dest="watermark", action="store_false")
     p.add_argument("--wm_scheme", type=str, default=None,
-                   choices=["faremark", "fedipr"],
-                   help="output-layer watermark scheme: faremark (softmax-BER) or "
-                        "fedipr (backdoor trigger-set). Default faremark.")
+                   choices=["faremark", "fedipr", "fedipr_sign"],
+                   help="output-layer watermark scheme: faremark (softmax-BER), "
+                        "fedipr (backdoor trigger-set, black-box), or fedipr_sign "
+                        "(FedIPR feature-based sign watermark, WHITE-BOX, forced into "
+                        "the output layer). Default faremark.")
     p.add_argument("--fedipr_num_trigger", type=int, default=None,
                    help="FedIPR: trigger images per client.")
     p.add_argument("--fedipr_trigger_source", type=str, default=None,
@@ -101,6 +103,16 @@ def parse_args():
     p.add_argument("--fedipr_target_mode", type=str, default=None,
                    choices=["cid", "fixed", "random"],
                    help="FedIPR trigger target label: cid (cid%%n), fixed (=5), random.")
+    # ---- FedIPR feature-based SIGN watermark (WHITE-BOX, output-layer) ----
+    p.add_argument("--fedipr_sign_bits", type=int, default=None,
+                   help="fedipr_sign: N bits per client (keep K*N <= carrier channels).")
+    p.add_argument("--fedipr_sign_margin", type=float, default=None,
+                   help="fedipr_sign: hinge margin mu in the sign-loss.")
+    p.add_argument("--fedipr_sign_lambda", type=float, default=None,
+                   help="fedipr_sign: weight of the sign-loss added to the task loss.")
+    p.add_argument("--fedipr_sign_carrier", type=str, default=None,
+                   help="fedipr_sign: carrier scale param name, or 'auto_last_bn' "
+                        "(the output-layer scale; server choice that forces the layer).")
     p.add_argument("--wm_bits", type=int, default=None)
     p.add_argument("--wm_balanced_keys", dest="wm_balanced_keys",
                    action="store_true", default=None,
@@ -188,6 +200,8 @@ _OVERRIDABLE = [
     # output-layer scheme selector + FedIPR backdoor knobs
     "wm_scheme", "fedipr_num_trigger", "fedipr_trigger_source",
     "fedipr_trigger_dir", "fedipr_target_mode",
+    # FedIPR feature-based sign watermark (white-box, output-layer)
+    "fedipr_sign_bits", "fedipr_sign_margin", "fedipr_sign_lambda", "fedipr_sign_carrier",
     "wm_eta_floor", "wm_eta_fixed", "calib_on_all",
     "tap_eta_source", "tap_eta_k", "tap_margin", "tap_when", "tap_period",
     "tap_max_coast", "tap_data_cpc", "tap_scope", "tap_coast_mode", "tap_graft_decay", "tap_probe_holdout",
@@ -350,6 +364,12 @@ def main():
             # FedIPR verifier reads each client's registered trigger set directly;
             # no shared/per-client test-image bank is needed.
             tmode = "fedipr_backdoor"
+            per_client_bank = False
+            trigger_bank = {}
+        elif scheme == "fedipr_sign":
+            # WHITE-BOX: the verifier reads the carrier scale straight from the
+            # submitted weights; no trigger images / bank at all.
+            tmode = "fedipr_sign_wb"
             per_client_bank = False
             trigger_bank = {}
         else:

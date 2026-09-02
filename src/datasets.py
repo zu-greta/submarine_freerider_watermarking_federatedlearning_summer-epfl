@@ -6,6 +6,7 @@ Non-IID (Dirichlet): for each class, draw a Dirichlet(alpha) vector over clients
     large alpha -> approaches IID. alpha~=0.5 is the common FL non-IID benchmark; 
     alpha>=100 is effectively IID
 """
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,11 +14,16 @@ import torch
 from torch.utils.data import DataLoader, Subset
 from torchvision import datasets, transforms
 
+# Food input resolution (env-overridable)
+FOOD_SIZE = int(os.environ.get("FOOD_SIZE", "64"))
+
 _NORM = {
     "mnist": ((0.1307,), (0.3081,)), # standard MNIST normalization
     "cifar10": ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)), # standard CIFAR-10 normalization
     "cifar100": ((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)), # standard CIFAR-100 normalization
+    "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),   # Food-101 (ETH-Zurich)
 }
+_FOOD = ("food101") 
 
 
 @dataclass
@@ -35,6 +41,14 @@ def _build_transforms(name: str, train: bool):
     tfms = []
     if name in ("cifar10", "cifar100") and train:
         tfms += [transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip()]
+    elif name in _FOOD:
+        # Food-101: variable-size JPEGs -> fixed FOOD_SIZE square
+        if train:
+            tfms += [transforms.RandomResizedCrop(FOOD_SIZE, scale=(0.7, 1.0)),
+                     transforms.RandomHorizontalFlip()]
+        else:
+            tfms += [transforms.Resize(int(FOOD_SIZE * 1.15)),
+                     transforms.CenterCrop(FOOD_SIZE)]
     tfms += [transforms.ToTensor(), transforms.Normalize(mean, std)]
     return transforms.Compose(tfms)
 
@@ -60,6 +74,22 @@ def _load_raw(name: str, data_root: str):
         test = datasets.CIFAR100(data_root, train=False, download=True,
                                  transform=_build_transforms(name, False))
         return train, test, 100, 3
+    if name == "food101":
+        # Food-101 (Bossard et al., ETH-Zurich): 101 classes, 750 train + 250 test per class
+        # (75,750 / 25,250 images). torchvision downloads a ~5 GB tarball on first use to
+        # <data_root>/food-101; keep data_root on the PVC so it is downloaded once and reused.
+        train = datasets.Food101(data_root, split="train", download=True,
+                                 transform=_build_transforms(name, True))
+        test = datasets.Food101(data_root, split="test", download=True,
+                                transform=_build_transforms(name, False))
+        # expose fast integer labels as .targets so partitioning / class-count helpers
+        # don't have to decode every JPEG (Food101 stores them privately in ._labels).
+        try:
+            train.targets = list(train._labels)
+            test.targets = list(test._labels)
+        except Exception:
+            pass
+        return train, test, 101, 3
     raise ValueError(f"Unknown dataset '{name}'.")
 
 

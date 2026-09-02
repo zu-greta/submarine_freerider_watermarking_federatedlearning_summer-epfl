@@ -72,6 +72,11 @@ PY_EXTRA=""
 [ -n "${FEDIPR_TRIGGER_SOURCE:-}" ] && PY_EXTRA="$PY_EXTRA --fedipr_trigger_source ${FEDIPR_TRIGGER_SOURCE}"
 [ -n "${FEDIPR_TRIGGER_DIR:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_trigger_dir ${FEDIPR_TRIGGER_DIR}"
 [ -n "${FEDIPR_TARGET_MODE:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_target_mode ${FEDIPR_TARGET_MODE}"
+# FedIPR feature-based SIGN watermark (white-box, output-layer)
+[ -n "${FEDIPR_SIGN_BITS:-}" ]    && PY_EXTRA="$PY_EXTRA --fedipr_sign_bits ${FEDIPR_SIGN_BITS}"
+[ -n "${FEDIPR_SIGN_MARGIN:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_sign_margin ${FEDIPR_SIGN_MARGIN}"
+[ -n "${FEDIPR_SIGN_LAMBDA:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_sign_lambda ${FEDIPR_SIGN_LAMBDA}"
+[ -n "${FEDIPR_SIGN_CARRIER:-}" ] && PY_EXTRA="$PY_EXTRA --fedipr_sign_carrier ${FEDIPR_SIGN_CARRIER}"
 [ -n "${WM_BITS:-}" ]          && PY_EXTRA="$PY_EXTRA --wm_bits ${WM_BITS}"
 [ "${BALANCED:-}" = "1" ]      && PY_EXTRA="$PY_EXTRA --wm_balanced_keys"
 [ -n "${WM_TRIGGER_ASSIGN:-}" ] && PY_EXTRA="$PY_EXTRA --wm_trigger_assign ${WM_TRIGGER_ASSIGN}"
@@ -140,8 +145,20 @@ if [ "$DRYRUN" = "1" ]; then
   exit 0
 fi
 
-OUTPUT_DIR="${MOUNT}/home/zu/results/${RUN_TAG}"
-DATA_ROOT="${MOUNT}/home/zu/data"
+# Per-dataset results subtree so a food101 run never overwrites a cifar100 one.
+# Prefer the dataset baked into PY_EXTRA (--dataset, set at manifest time and stored in
+# jobs.tsv), so the output path is right even if the pool doesn't export DATASET; fall
+# back to the env switch, then cifar100. Families are unchanged.
+DS_FROM_PY="$(printf '%s' "$PY_EXTRA" | sed -n 's/.*--dataset \([^ ]*\).*/\1/p')"
+DATASET="${DS_FROM_PY:-${DATASET:-cifar100}}"
+# cifar100 keeps the original flat path (back-compat with existing results); any other
+# dataset gets its own subtree so runs never collide.
+if [ "$DATASET" = "cifar100" ]; then
+  OUTPUT_DIR="${MOUNT}/home/zu/results/${RUN_TAG}"
+else
+  OUTPUT_DIR="${MOUNT}/home/zu/results/${DATASET}/${RUN_TAG}"
+fi
+DATA_ROOT="${MOUNT}/home/zu/data"   # shared; torchvision caches each dataset in its own subdir
 JOB_NAME="faremark-c${CONFIG_IDX}-r${REPEAT}${FR_TAG}${USER_TAG}-$(date +%H%M%S)"
 
 echo "=== Submitting $JOB_NAME (config_idx=$CONFIG_IDX repeat=$REPEAT) ==="
@@ -153,7 +170,8 @@ runai submit "$JOB_NAME" \
   -e "CONFIG_IDX=$CONFIG_IDX" -e "REPEAT=$REPEAT" -e "OUTPUT_DIR=$OUTPUT_DIR" \
   -e "DATA_ROOT=$DATA_ROOT" -e "GIT_REPO=$GIT_REPO" -e "GIT_BRANCH=$GIT_BRANCH" \
   -e "SCRIPT=$SCRIPT" -e "PY_EXTRA=$PY_EXTRA" \
-  -e "SMOOTH_EPS=${SMOOTH_EPS:-1e-3}" \
+  -e "SMOOTH_EPS=${SMOOTH_EPS:-1e-3}" -e "DATASET=$DATASET" -e "FOOD_SIZE=${FOOD_SIZE:-64}" \
+  -e "FOOD100_DIR=${FOOD100_DIR:-}" -e "FOOD100_DOWNLOAD=${FOOD100_DOWNLOAD:-1}" \
   -e "NOTE=${NOTE:-}" -e "DEBUG_HOLD=$DEBUG_HOLD" \
   --command -- bash -c '
     set -euo pipefail

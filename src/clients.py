@@ -24,8 +24,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from . import watermark as wm
-from . import watermark_fedipr as wf
+from . import watermark as wm                       # 1st scheme: FareMark trigger class watermarking
+from . import watermark_fedipr as wf                # 2nd scheme: backdoor trigger embedding
+from . import watermark_fedipr_sign as wfs          # 3rd scheme: white-box output-layer sign
 from .compute_meter import ComputeMeter
 
 
@@ -94,7 +95,12 @@ class WatermarkClient(Client):
                  exclude: object = "trigger",
                  wm_scheme: str = "faremark",
                  fedipr_trig_x: torch.Tensor | None = None,
-                 fedipr_trig_y: torch.Tensor | None = None, **kw):
+                 fedipr_trig_y: torch.Tensor | None = None,
+                 # ---- FedIPR feature-based sign watermark (white-box, output-layer) ----
+                 sign_E: torch.Tensor | None = None,
+                 sign_bits: torch.Tensor | None = None,
+                 sign_carrier: str | None = None,
+                 sign_lambda: float = 1.0, sign_margin: float = 0.1, **kw):
         super().__init__(*args, **kw)
         self.trigger_class = trigger_class
         self.key = key
@@ -115,6 +121,12 @@ class WatermarkClient(Client):
         self._wm_trig_y = fedipr_trig_y
         self._fedipr_full_x = fedipr_trig_x
         self._fedipr_full_y = fedipr_trig_y
+        # ---- FedIPR feature-based sign watermark state (wm_scheme="fedipr_sign") ----
+        self._sign_E = sign_E
+        self._sign_bits = sign_bits
+        self._sign_carrier = sign_carrier
+        self._sign_lambda = float(sign_lambda)
+        self._sign_margin = float(sign_margin)
 
     # ---- method to override ------------------------------------------------
     def produce_update(self, global_state: dict, prev_global_state, round_idx):
@@ -123,6 +135,11 @@ class WatermarkClient(Client):
         if self.wm_scheme == "fedipr":
             # FedIPR backdoor: task CE + trigger CE (alpha=1), plain FedAvg update
             self._local_train_fedipr(round_idx)
+            self.meter.end_round(trained=True)
+            return _to_cpu_state(self.model), self.num_samples
+        if self.wm_scheme == "fedipr_sign":
+            # FedIPR feature-based sign (WHITE-BOX): task CE + hinge sign-loss on output layer
+            self._local_train_fedipr_sign(round_idx)
             self.meter.end_round(trained=True)
             return _to_cpu_state(self.model), self.num_samples
         self._local_train_wm(round_idx) # train L = L_cl + lambda * L_wm and log the two loss terms
@@ -257,6 +274,66 @@ class WatermarkClient(Client):
             "total_loss": round(tot_sum / max(n_batches, 1), 5),
             "trig_train_acc": round(trig_correct / trig_total, 4) if trig_total else None,
             "n_trigger_samples": int(trig_total),
+            "trigger_class": int(self.trigger_class),
+        }
+
+    # ---- FedIPR feature-based SIGN embedding (WHITE-BOX, output-layer) --
+    def _local_train_fedipr_sign(self, round_idx=None):
+        """FedIPR feature-based watermark: L = L_task(CE) + lambda * L_sign, where
+        L_sign is the hinge sign-loss (Eq. 19) driving sign(gamma . E_k) -> B_k on the
+        carrier scale vector `self._sign_carrier` (an output-layer scale, in head2).
+        """
+        self.model.train()
+        opt = torch.optim.SGD(self.model.parameters(), lr=self.lr,
+                              momentum=self.momentum, weight_decay=self.weight_decay)
+        E, bits = self._sign_E, self._sign_bits
+        carrier = self._sign_carrier
+        lam, margin = self._sign_lambda, self._sign_margin
+        cl_sum = wm_sum = tot_sum = 0.0
+        n_batches = 0
+        saw_task = False
+        params = dict(self.model.named_parameters())
+        for _ in range(self.local_epochs):
+            for x, y in self.loader:                       # reduced loader for a FR tap; full shard honest
+                saw_task = True
+                x, y = x.to(self.device), y.to(self.device)
+                opt.zero_grad()
+                cl = F.cross_entropy(self.model(x), y, label_smoothing=self.label_smoothing)
+                gamma = params[carrier]                    # live carrier scale (requires grad)
+                wml = wfs.sign_embed_loss(gamma, E, bits, margin)
+                loss = cl + lam * wml
+                loss.backward()
+                if not torch.isfinite(loss):
+                    opt.zero_grad(set_to_none=True); continue
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                opt.step()
+                cl_sum += float(cl.detach()); wm_sum += float(wml.detach())
+                tot_sum += float(loss.detach()); n_batches += 1
+                if self.meter is not None and self.meter._cur is not None:
+                    self.meter.record_batch(len(x))
+        # fallback: no task batches this round (e.g. cpc=0) -> embed the sign string alone
+        if not saw_task:
+            for _ in range(max(1, self.local_epochs)):
+                opt.zero_grad()
+                gamma = dict(self.model.named_parameters())[carrier]
+                wml = lam * wfs.sign_embed_loss(gamma, E, bits, margin)
+                wml.backward()
+                if torch.isfinite(wml):
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                    opt.step()
+                wm_sum += float(wml.detach()); tot_sum += float(wml.detach()); n_batches += 1
+        # log per-round losses + the current white-box sign BER (mark strength)
+        with torch.no_grad():
+            cur_ber = wfs.sign_ber(dict(self.model.named_parameters())[carrier].detach(),
+                                   E, bits)
+        if not hasattr(self, "wm_stats"):
+            self.wm_stats = {}
+        self.wm_stats[int(round_idx) if round_idx is not None else len(self.wm_stats)] = {
+            "cls_loss": round(cl_sum / max(n_batches, 1), 5),
+            "wm_loss": round(wm_sum / max(n_batches, 1), 5),
+            "total_loss": round(tot_sum / max(n_batches, 1), 5),
+            "trig_train_acc": round(1.0 - cur_ber, 4),     # = 1 - sign BER (mark present-ness)
+            "n_trigger_samples": int(len(bits)),           # N sign bits
             "trigger_class": int(self.trigger_class),
         }
 
@@ -413,6 +490,24 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
             data_root=data_root, folder=getattr(cfg, "fedipr_trigger_dir", "") or None)
         registry.scheme = "fedipr"
 
+    # ---- FedIPR SIGN (white-box): resolve the output layer carrier + per-client secrets --
+    sign_sets = {}
+    sign_carrier_name = None
+    if scheme == "fedipr_sign":
+        # server chooses the carrier: default output-layer scale (head2).
+        sign_carrier_name = wfs.resolve_carrier_name(
+            model, str(getattr(cfg, "fedipr_sign_carrier", "auto_last_bn")))
+        C = wfs.carrier_num_channels(model, sign_carrier_name)
+        n_bits = int(getattr(cfg, "fedipr_sign_bits", 40))
+        if len(client_loaders) * n_bits > C:
+            import warnings
+            warnings.warn(f"[fedipr_sign] K*N = {len(client_loaders)}*{n_bits} > carrier "
+                          f"channels {C}: capacity exceeded (FedIPR Thm.1), honest BER "
+                          f"floor will rise. Lower fedipr_sign_bits or pick a wider carrier.")
+        sign_sets = wfs.build_client_signsets(range(len(client_loaders)), n_bits, C, seed)
+        registry.scheme = "fedipr_sign"
+        registry.sign_carrier = sign_carrier_name
+
     clients, unembed = [], []
     # build each client with its trigger class, key, and target bits
     for cid, loader in enumerate(client_loaders):
@@ -427,6 +522,20 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
             registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
             fedipr_kw = dict(wm_scheme="fedipr",
                              fedipr_trig_x=ts["x"], fedipr_trig_y=ts["y"])
+        elif scheme == "fedipr_sign":
+            # ---- FedIPR feature-based sign (WHITE-BOX): secret E_k, B_k, carrier ----
+            ss = sign_sets[cid]
+            trigger_class = cid % num_classes   # no real trigger class - for plotting
+            key = bits = None
+            unembed.append(0.0)
+            registry.register_fedipr_sign(cid, trigger_class, ss["E"], ss["bits"],
+                                          sign_carrier_name)
+            registry.trigger_holdings[cid] = int(len(ss["bits"]))   # = N sign bits
+            registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
+            fedipr_kw = dict(wm_scheme="fedipr_sign", sign_E=ss["E"], sign_bits=ss["bits"],
+                             sign_carrier=sign_carrier_name,
+                             sign_lambda=float(getattr(cfg, "fedipr_sign_lambda", 1.0)),
+                             sign_margin=float(getattr(cfg, "fedipr_sign_margin", 0.1)))
         else:
             # priority: explicit map > distribution assignment > round-robin
             if cid in tmap:
@@ -536,6 +645,9 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     if scheme == "fedipr":
         # no key geometry; report trigger-set size so logs/results stay populated
         registry.m, registry.l = int(getattr(cfg, "fedipr_num_trigger", 40)), 1
+    elif scheme == "fedipr_sign":
+        # m = N sign bits per client; l=1 
+        registry.m, registry.l = int(getattr(cfg, "fedipr_sign_bits", 40)), 1
     else:
         registry.m, registry.l = m, l
     registry.unembeddable_frac = round(frac, 4)
@@ -698,6 +810,8 @@ class _SimpleFRMixin:
         if getattr(self, "wm_scheme", "faremark") == "fedipr":
             return self._prepare_fedipr(common_per_class, n_probe_holdout,
                                         n_common_classes, trigger_train_n)
+        if getattr(self, "wm_scheme", "faremark") == "fedipr_sign":
+            return self._prepare_sign(common_per_class, n_common_classes)
         self._prepared = True
         bs = getattr(self.loader, "batch_size", 16) or 16 # batch size for the reduced loader
 
@@ -748,8 +862,7 @@ class _SimpleFRMixin:
                         n_common_classes: int = -1, trigger_train_n: int = -1):
         """FedIPR analogue of _prepare: split the client's own trigger set into an
         embed slice + a held-out probe slice, and build a reduced task loader of
-        N common-class images from the shard. The trigger images (not shard rows)
-        are what re-embeds the backdoor, no trigger class to mask out of the shard."""
+        N common-class images from the shard"""
         if getattr(self, "_prepared", False):
             return
         self._prepared = True
@@ -802,10 +915,46 @@ class _SimpleFRMixin:
             self._reduced_n = 0
             self._reduced_loader = []                    # trigger-only: no task batches
 
+    def _prepare_sign(self, common_per_class: int, n_common_classes: int = -1):
+        """FedIPR-sign analogue of _prepare: no trigger imgs/class. mark carried by model weights
+        Build reduced task loader of `common_per_class` images per class from the shard."""
+        if getattr(self, "_prepared", False):
+            return
+        self._prepared = True
+        bs = getattr(self._orig_loader, "batch_size", 16) or 16
+        self._probe_x = None                             # sign BER is read from weights, not images
+        if common_per_class and common_per_class > 0:
+            comm_x, comm_y = [], []
+            for x, y in self._orig_loader:
+                comm_x.append(x.detach().cpu()); comm_y.append(y.detach().cpu())
+            cx, cy = torch.cat(comm_x), torch.cat(comm_y)
+            classes = cy.unique()
+            if n_common_classes is not None and 0 < n_common_classes < len(classes):
+                sel = torch.randperm(len(classes))[:n_common_classes]
+                classes = classes[sel]
+            self._common_classes_used = [int(c) for c in classes]
+            xs, ys = [], []
+            for cls in classes:
+                idx = (cy == cls).nonzero(as_tuple=True)[0]
+                take = idx[torch.randperm(len(idx))[:common_per_class]]
+                xs.append(cx[take]); ys.append(cy[take])
+            X, Y = torch.cat(xs), torch.cat(ys)
+            self._reduced_n = len(X)
+            self._reduced_loader = DataLoader(TensorDataset(X, Y),
+                                              batch_size=min(bs, max(1, len(X))),
+                                              shuffle=True)
+        else:
+            self._reduced_n = 0
+            self._reduced_loader = []                    # sign-only tap: embed with no task data
+
     @torch.no_grad()
     def _probe_ber(self, state) -> float | None:
-        """BER of this client's mark in `state`, on held-out trigger images.
+        """BER of this client's mark in `state`.
         used by the adaptive-tap free-rider to decide whether to coast or tap."""
+        if getattr(self, "wm_scheme", "faremark") == "fedipr_sign":
+            # WHITE-BOX: read the carrier scale straight from the submitted weights.
+            return wfs.sign_ber_from_state(state, self._sign_carrier,
+                                           self._sign_E, self._sign_bits, device="cpu")
         if getattr(self, "wm_scheme", "faremark") == "fedipr":
             if getattr(self, "_probe_x", None) is None:
                 return None
