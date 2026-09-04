@@ -1,36 +1,31 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run_now.sh -- builds jobs.tsv for a chosen set of groups
-# Called by runbook.sh manifest. Submits nothing; submit_pool.sh runs it.
-#
+# run_now.sh -- builds jobs.tsv (called by runbook manifest)
+
 #   ./run_now.sh              # default groups (A)
 #   ./run_now.sh "E EA K"     # E + EA + K together   (whole tokens, space/comma separated)
 #   ./run_now.sh A            # just group A
 #
-# GROUPS (tokens are matched whole: "H T EA" -> H, T, EA; not E or A)
-#   A  proven IID baseline (A1 honest, A2 reduced easy c17, A3 reduced hard c36)
+# GROUPS 
+# Faremark:
+#   A  IID baseline (A1 honest, A2 reduced easy c17, A3 reduced hard c36)
 #   T  honest band generality: trigger classes beyond 0-9 (check the mapping)
 #   D  reduced free-rider +N data-budget spectrum (c36)
 #   E  non-IID starved (E1 honest, E2 reduced, E3 alpha sweep)
 #   EA non-IID distribution-aware assignment (EA1 honest, EA2 reduced)
-#   H  baseline free-riders (positive controls that MUST be caught): H5 previous-models
-#      on c100 (our setting) + H6 gaussian-noise on c100.  Paper-setting CIFAR-10 rows
-#      are the optional `grade` phase (paper_check), not here.
-#   K  the submarine: K4 (block2 scope) + K9 (head2 scope) - 1,7 and 3,6
-#   L  graftblock free-rider (last-block-only) - 1,7 and 3,6
+#   H  baseline free-riders: H5 previous-models + H6 gaussian-noise
+#   K  the submarine: K4 (block2 scope) + K9 (head2 scope) - 1,7 and 3,6 (appendix)
+#   L  graftblock free-rider (head2 scope) - 1,7 and 3,6 - (our attack)
 #   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
-#   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6)
-#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr.
-#   G  FedIPR SIGN (3rd scheme, WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, mark in the
-#      OUTPUT-LAYER scale (auto_last_bn, in head2), read white-box. Free-rider trains only head2.
+#   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6) (appendix)
+# FedIPR:
+#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr - TODO
+#   G  FedIPR SIGN (3rd scheme, WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, wm in the output layer head2 - TODO
 #
 # =============================================================================
 set -uo pipefail
 # ===================== DATASET SWITCH (decide once, here) =====================
-# Every family below runs on THIS dataset. Choices:
-#   cifar100 (default) | cifar10 | mnist | food101 (ETH-Zurich Food-101, auto-download)
-#   
-# It is exported, so every `env ... ./submit_experiment.sh` call inherits it and adds `--dataset $DATASET`
+# DATASET CONFIG: cifar100 (default) | cifar10 | mnist | food101 
 export DATASET="${DATASET:-cifar100}"
 export FOOD_SIZE="${FOOD_SIZE:-64}"           # Food-101 input resolution (only used for food101)
 export DRYRUN=1 JOBS_FILE="${JOBS_FILE:-jobs.tsv}"
@@ -46,7 +41,7 @@ has(){ [[ "$WANT" == *" $1 "* ]]; }
 # GROUP A -- proven IID baseline (cifar100, 10 clients). 
 # ---------------------------------------------------------------------------
 if has A; then
-  echo "   (group A -- uncomment loops below to regenerate)"
+  echo " Group A -- IID baseline (cifar100, 10 clients)"
   for s in 0 1 2 3 4 5; do
     env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
         FAMILY="A1_honest_c100" NOTE="A1 honest baseline" ./submit_experiment.sh 14 "$s"
@@ -64,8 +59,7 @@ if has A; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP T -- honest-band generality: show the per-class BER band is not an artifact
-#   of only ever using classes 0-9 (cid % num_classes)
+# GROUP T -- honest-band generality
 # ---------------------------------------------------------------------------
 if has T; then
   SEEDS_T="${SEEDS_T:-0 1 2}"
@@ -256,8 +250,7 @@ fi
 
 
 # ---------------------------------------------------------------------------
-# GROUP H -- H5 base previous-models free-rider on c100 (positive control).
-#   Must be CAUGHT (BER ~0.5-0.8). cids 3,6 to match K4/D1.
+# GROUP H -- H5 base previous-models free-rider on c100 
 # ---------------------------------------------------------------------------
 if has H; then
   for s in 0 1 2; do
@@ -300,12 +293,6 @@ if has K; then
         NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # # K5 -- full scope - classes 3,6
-  # for s in $SEEDS_K; do
-  #   env $kbase TAP_SCOPE=full FAMILY="K5_alldyn_full_c36" \
-  #       NOTE="K5 all-dynamic + full-scope taps (scope ablation vs K4/block2)" \
-  #       ./submit_experiment.sh 14 "$s"
-  # done
 
   # K9 -- HEAD2 scope submarine (all-dynamic), matches LastBlock's head2 scope 
   #       K9 hard/medium classes 3,6
@@ -320,42 +307,10 @@ if has K; then
         NOTE="K9 easy classes all-dynamic + head2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-
-  # # kfix = FIXED-margin cost-optimised base (self-eta, FIXED margin, dynamic warmup, block2).
-  # #   K7 and K8 differ only in margin / max_coast / cpc (set per-run below).
-  # kfix="ATTACK=adaptive_tap FREE_RIDER_IDS=3,6 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
-  #        AUTOP_ORACLE_ETA=0.264 WM_ETA_FIXED=0.064 \
-  #        TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
-  #        TAP_GRAFT_DECAY=0.10 TAP_MARGIN_MODE=fixed ROUNDS=50 FAST_DATA=1 \
-  #        TAP_ETA_SOURCE=self TAP_ETA_K=3.0 \
-  #        TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
-  #        TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15 TAP_SCOPE=block2"
-
-  # # K7 -- hard-class data bump: fixed margin 0.03, longer coast (12), cpc 10, classes 3,6
-  # for s in $SEEDS_K; do
-  #   env $kfix TAP_MARGIN=0.03 TAP_MAX_COAST=12 TAP_DATA_CPC=10 \
-  #       FAMILY="K7_costopt_block2_cpc10_c36" \
-  #       NOTE="K7 fixed-margin block2, cpc=10 (more embed signal on the hard class)" \
-  #       ./submit_experiment.sh 14 "$s"
-  # done
-  # # K8 -- margin optimized submarine: fixed margin 0.12 (stops over-threshold spikes), coast 8, cpc 5.
-  # for s in $SEEDS_K; do
-  #   env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 \
-  #       FAMILY="K8_opt_block2_c36" \
-  #       NOTE="K8 optimised block2 (fixed margin 0.12) -- hard classes 3,6" \
-  #       ./submit_experiment.sh 14 "$s"
-  # done
-  # for s in $SEEDS_K; do
-  #   env $kfix TAP_MARGIN=0.12 TAP_MAX_COAST=8 TAP_DATA_CPC=5 FREE_RIDER_IDS=1,7 \
-  #       FAMILY="K8_opt_block2_c17" \
-  #       NOTE="K8 optimised block2 (fixed margin 0.12) -- easy classes 1,7" \
-  #       ./submit_experiment.sh 14 "$s"
-  # done
 fi
 
 # ---------------------------------------------------------------------------
 # GROUP Z -- NO-WATERMARK sanity check (trigger class accuracy) 
-#   All-honest run with the watermark embedding disabled (WM_LAMBDA=0) 
 # ---------------------------------------------------------------------------
 if has Z; then
   SEEDS_Z="${SEEDS_Z:-0}"                      # single seed
@@ -395,7 +350,7 @@ fi
 
 if has L; then
   # ---------------------------------------------------------------------------
-  # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock").
+  # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock") - OUR ATTACK
   #   Warm up honest, then free-ride train only the last layers on a reduced shard (cpc=5)
   #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
   # ---------------------------------------------------------------------------
@@ -434,13 +389,8 @@ if has L; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP F -- FedIPR backdoor = the second output-layer watermark scheme.
-#   Mirrors A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, but with
-#   WM_SCHEME=fedipr. Trigger images: SVHN OOD by default (downloaded like CIFAR;
-#   set FEDIPR_TRIGGER_SOURCE=noise for a self-contained no-download run, or
-#   =folder with FEDIPR_TRIGGER_DIR=<path> for an exact trigger folder).
-#   ber_fedipr = 1 - trigger_set_accuracy, so every plot/eta path is reused.
-#   eta: recalibrate from F_A1_honest (honest ber ~ 0). FEDIPR_ETA is tmp
+# GROUP F -- FedIPR backdoor (black box)
+#   A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine with fedipr backdoor
 # ---------------------------------------------------------------------------
 if has F; then
   SEEDS_F="${SEEDS_F:-0 1 2}"
@@ -478,34 +428,29 @@ if has F; then
         NOTE="F_L5 FedIPR graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
   done
   # F_K9 / F_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
-  fkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
-          AUTOP_ORACLE_ETA=$FIETA WM_ETA_FIXED=$FIETA TAP_DATA_CPC=5 \
-          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
-          TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
-          TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
-          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
-          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
-  for s in $SEEDS_F; do
-    env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
-        FAMILY="F_K9_alldyn_head2_c36_fi"  NOTE="F_K9 FedIPR submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
-    env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
-        FAMILY="F_K9_alldyn_head2_c17_fi"  NOTE="F_K9 FedIPR submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
-    env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
-        FAMILY="F_K4_alldyn_block2_c36_fi" NOTE="F_K4 FedIPR submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
-    env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
-        FAMILY="F_K4_alldyn_block2_c17_fi" NOTE="F_K4 FedIPR submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
-  done
+  # fkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+  #         AUTOP_ORACLE_ETA=$FIETA WM_ETA_FIXED=$FIETA TAP_DATA_CPC=5 \
+  #         TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+  #         TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+  #         TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+  #         TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+  #         TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
+  # for s in $SEEDS_F; do
+  #   env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
+  #       FAMILY="F_K9_alldyn_head2_c36_fi"  NOTE="F_K9 FedIPR submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
+  #   env $FI $fkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
+  #       FAMILY="F_K9_alldyn_head2_c17_fi"  NOTE="F_K9 FedIPR submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
+  #   env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
+  #       FAMILY="F_K4_alldyn_block2_c36_fi" NOTE="F_K4 FedIPR submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
+  #   env $FI $fkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
+  #       FAMILY="F_K4_alldyn_block2_c17_fi" NOTE="F_K4 FedIPR submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
+  # done
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP G -- FedIPR feature-based SIGN watermark = the THIRD (WHITE-BOX) scheme.
-#   Same story as F but the mark is embedded in the SIGNS of the OUTPUT-LAYER
-#   scale (auto_last_bn, inside head2) and read WHITE-BOX from the weights.
-#   Mirrors A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, under
-#   WM_SCHEME=fedipr_sign. Free-rider trains ONLY head2 (which contains the carrier)
-#   -> re-embeds its own bits -> ber ~ 0 -> evades, exactly like the black-box marks.
-#   ber_sign = Hamming(sign(gamma.E), B)/N ; honest ~ 0, chance = 0.5 (like FareMark).
-#   eta: recalibrate from G_A1_honest (honest ber ~ 0). GS_ETA is provisional.
+# GROUP G -- FedIPR feature-based SIGN watermark = white-box scheme.
+#   wm embedded in the signs of the output layer scale + read white box from weights
+#   A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, with fedipr sign
 # ---------------------------------------------------------------------------
 if has G; then
   SEEDS_G="${SEEDS_G:-0 1 2}"
@@ -544,22 +489,40 @@ if has G; then
         NOTE="G_L5 FedIPR-sign graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
   done
   # G_K9 / G_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
-  gkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
-          AUTOP_ORACLE_ETA=$GSETA WM_ETA_FIXED=$GSETA TAP_DATA_CPC=5 \
-          TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
-          TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
-          TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
-          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
-          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
-  for s in $SEEDS_G; do
-    env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
-        FAMILY="G_K9_alldyn_head2_c36_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
-    env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
-        FAMILY="G_K9_alldyn_head2_c17_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
-    env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
-        FAMILY="G_K4_alldyn_block2_c36_ws" NOTE="G_K4 FedIPR-sign submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
-    env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
-        FAMILY="G_K4_alldyn_block2_c17_ws" NOTE="G_K4 FedIPR-sign submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
+  # gkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
+  #         AUTOP_ORACLE_ETA=$GSETA WM_ETA_FIXED=$GSETA TAP_DATA_CPC=5 \
+  #         TAP_COAST_MODE=graft TAP_WHEN=threshold TAP_PROBE_HOLDOUT=16 \
+  #         TAP_MARGIN=0.03 TAP_MAX_COAST=6 TAP_GRAFT_DECAY=0.25 ROUNDS=50 FAST_DATA=1 \
+  #         TAP_ETA_SOURCE=self TAP_ETA_K=3.0 TAP_MARGIN_MODE=derived TAP_MARGIN_K=1.0 \
+  #         TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
+  #         TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
+  # for s in $SEEDS_G; do
+  #   env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=3,6 \
+  #       FAMILY="G_K9_alldyn_head2_c36_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (3,6)" ./submit_experiment.sh 14 "$s"
+  #   env $GI $gkbase TAP_SCOPE=head2  FREE_RIDER_IDS=1,7 \
+  #       FAMILY="G_K9_alldyn_head2_c17_ws"  NOTE="G_K9 FedIPR-sign submarine head2 (1,7)" ./submit_experiment.sh 14 "$s"
+  #   env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=3,6 \
+  #       FAMILY="G_K4_alldyn_block2_c36_ws" NOTE="G_K4 FedIPR-sign submarine block2 (3,6)" ./submit_experiment.sh 14 "$s"
+  #   env $GI $gkbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 \
+  #       FAMILY="G_K4_alldyn_block2_c17_ws" NOTE="G_K4 FedIPR-sign submarine block2 (1,7)" ./submit_experiment.sh 14 "$s"
+  # done
+
+  # ---- LAYER SWEEP: "more watermarked layers beats the free-rider" -----------
+  #   For each layer count NL, an honest calibration family + a graftblock head2 FR 3,6
+  for NL in ${SIGN_LAYERS_SWEEP:-1 2 4}; do
+    GIL="$GI FEDIPR_SIGN_LAYERS=$NL"
+    for s in 0 1 2; do
+      env $GIL ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+          FAMILY="G_A1_honest_c100_ws_L${NL}" \
+          NOTE="G_A1 FedIPR-sign honest, ${NL} carrier layer(s) (calibration/floor)" \
+          ./submit_experiment.sh 14 "$s"
+    done
+    for s in $SEEDS_G; do
+      env $GIL $gbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
+          FAMILY="G_L1_graftblock_head2_c36_ws_L${NL}" \
+          NOTE="G_L1 FedIPR-sign graftblock head2, ${NL} carrier layer(s) (3,6)" \
+          ./submit_experiment.sh 14 "$s"
+    done
   done
 fi
 

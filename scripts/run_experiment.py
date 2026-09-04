@@ -35,7 +35,7 @@ from src.manifest import build_manifest
 from src import runlog
 from src.config import ExpConfig
 
-SCHEMA_VERSION = 2   # keep in sync with scripts/resultio.py:SCHEMA_VERSION
+SCHEMA_VERSION = 2   # Note: keep in sync with scripts/resultio.py:SCHEMA_VERSION
 
 
 def parse_args():
@@ -103,9 +103,13 @@ def parse_args():
     p.add_argument("--fedipr_target_mode", type=str, default=None,
                    choices=["cid", "fixed", "random"],
                    help="FedIPR trigger target label: cid (cid%%n), fixed (=5), random.")
-    # ---- FedIPR feature-based SIGN watermark (WHITE-BOX, output-layer) ----
+    # ---- FedIPR feature-based SIGN watermark (WHITE-BOX, 1+ normalization layers) ----
+    p.add_argument("--fedipr_sign_layers", type=int, default=None,
+                   help="fedipr_sign: how many normalization layers carry the mark (server "
+                        "choice). 1 = output layer only (fragile); >1 spreads into the body "
+                        "and beats the head2 free-rider.")
     p.add_argument("--fedipr_sign_bits", type=int, default=None,
-                   help="fedipr_sign: N bits per client (keep K*N <= carrier channels).")
+                   help="fedipr_sign: bits PER carrier layer (auto-clamped to channels//K).")
     p.add_argument("--fedipr_sign_margin", type=float, default=None,
                    help="fedipr_sign: hinge margin mu in the sign-loss.")
     p.add_argument("--fedipr_sign_lambda", type=float, default=None,
@@ -200,8 +204,9 @@ _OVERRIDABLE = [
     # output-layer scheme selector + FedIPR backdoor knobs
     "wm_scheme", "fedipr_num_trigger", "fedipr_trigger_source",
     "fedipr_trigger_dir", "fedipr_target_mode",
-    # FedIPR feature-based sign watermark (white-box, output-layer)
-    "fedipr_sign_bits", "fedipr_sign_margin", "fedipr_sign_lambda", "fedipr_sign_carrier",
+    # FedIPR feature-based sign watermark (white-box, 1+ normalization layers)
+    "fedipr_sign_layers", "fedipr_sign_bits", "fedipr_sign_margin", "fedipr_sign_lambda",
+    "fedipr_sign_carrier",
     "wm_eta_floor", "wm_eta_fixed", "calib_on_all",
     "tap_eta_source", "tap_eta_k", "tap_margin", "tap_when", "tap_period",
     "tap_max_coast", "tap_data_cpc", "tap_scope", "tap_coast_mode", "tap_graft_decay", "tap_probe_holdout",
@@ -518,10 +523,7 @@ def main():
         "repeat": args.repeat,
         "seed": seed,
         "device": device,
-        # which physical GPU this run landed on. RCP is heterogeneous (V100 / A100-40 /
-        # A100-80 / H100 / H200), and timing metrics (gpu_ms, wall_ms) are only
-        # comparable across runs that used the SAME card. BER / accuracy / samples /
-        # flops do not depend on this. Recorded so every run self-documents.
+        # GPU info
         "gpu_name": _gpu_name(),
         "gpu_count": (torch.cuda.device_count() if torch.cuda.is_available() else 0),
         "env": {

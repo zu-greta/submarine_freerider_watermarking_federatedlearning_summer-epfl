@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# submit_pool.sh -- run the whole experiment matrix on a fixed number of pods.
-#
-# Each pod carries its own slice of the manifest and replays it with WORKERS
-# concurrent runs on its single GPU. Two pods = 2 GPUs = 2*WORKERS runs at once.
-#
+# submit_pool.sh 
 #   ./submit_pool.sh                 # PODS=2, WORKERS=6, reads ./jobs.tsv
-#
-# HETEROGENEOUS GPUs (e.g. one A100-80 + one A100-40) -- assign per pod:
-#   POOLS="a100-80 a100-40" WORKERS_LIST="6 4" PODS=2 ./submit_pool.sh
 #
 # Build the manifest first, from your existing leg definitions:
 #   rm -f jobs.tsv
-#   DRYRUN=1 ./run_everything.sh submit
 # =============================================================================
 set -uo pipefail
 

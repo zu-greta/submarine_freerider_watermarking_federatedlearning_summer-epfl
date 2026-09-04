@@ -1,18 +1,16 @@
-"""FedIPR feature-based (WHITE-BOX) sign watermark -- embedded across one or MORE
+"""FedIPR feature-based (white-box) sign watermark -- embedded across one or more
 normalization layers (server-decided), read white-box from the weights.
 
 ================================================================================
- FedIPR hides a bit-string in the SIGNS of normalization scale weights W_gamma and
- reads it white-box. 
+ FedIPR white box hides bit string in signs of norm scale weights + reads white box
  Each chosen layer i carries its own bit-slice B_i via its own secret matrix E_i:
         embed :  minimise  sum_i  mean_j max( margin - b'_{i,j} * (gamma_i . E_i)_j , 0 )
         read  :  B_hat_i = sign(gamma_i . E_i)  ;  BER = total Hamming / total bits.
 
- SERVER CHOOSES HOW MANY LAYERS (config.fedipr_sign_carrier / fedipr_sign_layers):
-   * fedipr_sign_layers = 1  (+ carrier "auto_last_bn")  -> ONLY the output-layer scale
+ server config num layers and which ones (config.fedipr_sign_carrier / fedipr_sign_layers):
+   * fedipr_sign_layers = 1  (+ carrier "auto_last_bn")  -> only output-layer scale
      (net.layer4.1.bn2.weight, inside head2). 
-   * fedipr_sign_layers = N (>1)  -> the N output-most normalization scales. The extra
-     carriers live in the BODY, OUTSIDE the head2 scope. 
+   * fedipr_sign_layers = N (>1)  -> N output-most normalization scales
    * carrier = "all_bn"  -> every normalization scale (full-depth FedIPR, most robust).
    * carrier = "name1,name2,..."  -> an explicit list (server forces exact locations).
 ================================================================================
@@ -26,7 +24,7 @@ import torch
 # Carrier -- which normalization scales carry the mark.
 # ---------------------------------------------------------------------------
 def list_bn_scale_names(model) -> list:
-    """All 1-D normalization scale weights (BN/norm/downsample-BN), in MODEL order
+    """All 1-D normalization scale weights (BN/norm/downsample-BN), in model order
     (input -> output). The last entry is the output-block scale."""
     names = []
     for n, p in model.named_parameters():
@@ -42,10 +40,9 @@ def list_bn_scale_names(model) -> list:
 def resolve_carrier_names(model, carrier: str = "auto_last_bn", n_layers: int = 1) -> list:
     """Return the ordered list of carrier param names (output-most first).
 
-    carrier="auto_last_bn" -> the last `n_layers` normalization scales (from the output
-                              backward). n_layers=1 == the single output-layer scale.
-    carrier="all_bn"       -> every normalization scale (deepest robustness).
-    carrier="a,b,c"        -> exactly these parameter names (server-forced locations).
+    carrier="auto_last_bn" -> the last `n_layers` normalization scales (from output backward). n_layers=1 == the single output-layer scale.
+    carrier="all_bn"       -> every normalization scale 
+    carrier="a,b,c"        -> exactly these parameter names 
     """
     named = dict(model.named_parameters())
     if carrier and carrier not in ("auto_last_bn", "all_bn"):
@@ -69,8 +66,7 @@ def per_carrier_channels(model, names) -> list:
 
 
 def plan_bits(channels, bits_per_layer: int, n_clients: int) -> list:
-    """Bits carried by each layer. Clamp to <= channels // n_clients so that K clients
-    sharing one layer's gamma can all embed (FedIPR Thm.1 capacity, K*bits <= C). >= 1."""
+    """Bits carried by each layer"""
     out = []
     for C in channels:
         cap = max(1, int(C) // max(1, int(n_clients)))
@@ -112,8 +108,7 @@ def _project(gamma: torch.Tensor, E: torch.Tensor) -> torch.Tensor:
 
 
 def sign_embed_loss(gammas, Es, bits_list, margin: float = 0.1) -> torch.Tensor:
-    """Mean over carriers of FedIPR hinge sign-loss (Eq. 19). Differentiable in the
-    trainable gammas; frozen carriers contribute a constant (no gradient)."""
+    """Mean over carriers of FedIPR sign-loss."""
     total = None
     for g, E, b in zip(gammas, Es, bits_list):
         z = _project(g, E)
@@ -125,7 +120,7 @@ def sign_embed_loss(gammas, Es, bits_list, margin: float = 0.1) -> torch.Tensor:
 
 @torch.no_grad()
 def sign_ber(gammas, Es, bits_list) -> float:
-    """Total per-bit BER over ALL carriers = (sum wrong bits) / (sum bits).
+    """Total per-bit BER over all carriers = (sum wrong bits) / (sum bits).
     Honest (all carriers embedded) ~0; a free-rider that only re-embedded some carriers
     keeps the others at chance -> ber ~ (untrained bits / total bits) * 0.5."""
     wrong = tot = 0
@@ -144,7 +139,7 @@ def gather_gammas_params(model, names) -> list:
 
 @torch.no_grad()
 def sign_ber_from_state(state: dict, names, Es, bits_list, device="cpu") -> float | None:
-    """WHITE-BOX read: pull every carrier scale from a submitted state_dict and compute
+    """white box read: pull every carrier scale from a submitted state_dict and compute
     the total BER. Returns None if a carrier is missing from the state."""
     gammas = []
     for n in names:

@@ -21,7 +21,7 @@ _NORM = {
     "mnist": ((0.1307,), (0.3081,)), # standard MNIST normalization
     "cifar10": ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)), # standard CIFAR-10 normalization
     "cifar100": ((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)), # standard CIFAR-100 normalization
-    "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),   # Food-101 (ETH-Zurich)
+    "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),   # Food-101 
 }
 _FOOD = ("food101") 
 
@@ -75,15 +75,11 @@ def _load_raw(name: str, data_root: str):
                                  transform=_build_transforms(name, False))
         return train, test, 100, 3
     if name == "food101":
-        # Food-101 (Bossard et al., ETH-Zurich): 101 classes, 750 train + 250 test per class
-        # (75,750 / 25,250 images). torchvision downloads a ~5 GB tarball on first use to
-        # <data_root>/food-101; keep data_root on the PVC so it is downloaded once and reused.
+        # Food-101 (Bossard et al., ETH-Zurich): 101 classes, 750 train + 250 test per class (75,750 / 25,250 images). 
         train = datasets.Food101(data_root, split="train", download=True,
                                  transform=_build_transforms(name, True))
         test = datasets.Food101(data_root, split="test", download=True,
                                 transform=_build_transforms(name, False))
-        # expose fast integer labels as .targets so partitioning / class-count helpers
-        # don't have to decode every JPEG (Food101 stores them privately in ._labels).
         try:
             train.targets = list(train._labels)
             test.targets = list(test._labels)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""plots.py -- all figures for the output-layer-watermarking free-rider study.
+"""plots.py -- TODO cleanup the plotting 
 
 Subcommands (one per figure family):
 

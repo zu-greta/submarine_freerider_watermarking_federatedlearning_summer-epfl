@@ -1,13 +1,11 @@
-"""FedIPR backdoor (black-box, output-read) watermark -- SECOND output-layer scheme.
+"""FedIPR backdoor (black-box, output-read) watermark 
 
-FedIPR paper's *backdoor* watermark (its Algorithm-3 `alpha * L_T` term)
+FedIPR backdoor black box watermark 
 
-Mechanism (FedIPR, Li et al. 2022; repo purp1eHaze/FedIPR utils/datasets.py):
+Mechanism (FedIPR, Li et al. 2022; repo purp1eHaze/FedIPR):
   * registration : each client k owns a private trigger set T_k = {(X_T, y_T)} of
                    `num_trigger` out-of-distribution images, each carrying a secret
-                   target label y_T. (repo: prepare_wm / prepare_wm_new load an image
-                   folder + assigned labels and hand each backdoored client a disjoint
-                   `wm_iid` slice.)
+                   target label y_T. 
   * embedding    : the client adds L_T = CE(y_T, f(X_T)) to its task loss (alpha=1).
   * verification : detection rate eta_T = mean( argmax f(X_T) == y_T ). Watermark
                    present iff eta_T >= 1 - eps_B.
@@ -19,8 +17,7 @@ FedIPR statistic as
 
         ber_fedipr := 1 - trigger_set_accuracy
 
-Honest client -> trigger acc ~1 -> ber ~0.  Free-rider -> trigger acc ~1/C ->
-ber ~ (1 - 1/C).  Nothing downstream needs to know how the scalar was produced.
+Honest client -> trigger acc ~1 -> ber ~0.  Free-rider -> trigger acc ~1/C -> ber ~ (1 - 1/C).  
 -------------------------------------------------------------------------------
 """
 from __future__ import annotations
@@ -29,9 +26,6 @@ import os
 import torch
 import torch.nn.functional as F
 
-# same per-dataset normalization the task inputs use (src/datasets.py:_NORM), so
-# an OOD trigger image is presented to the model in the same input space it was
-# trained in -- this is exactly what the repo's prepare_wm does (CIFAR mean/std).
 _NORM = {
     "mnist": ((0.1307,), (0.3081,)),
     "cifar10": ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
@@ -56,8 +50,7 @@ def _normalize(x: torch.Tensor, dataset: str) -> torch.Tensor:
 # Trigger POOL (the OOD images), before per-client slicing
 # ---------------------------------------------------------------------------
 def _pool_noise(n_total, in_channels, hw, seed) -> torch.Tensor:
-    """Self-contained, reproducible OOD triggers: fixed pseudo-random RGB images.
-    Needs no network and no external files -- the safe default on any cluster."""
+    """Self-contained, reproducible OOD triggers: fixed pseudo-random RGB images"""
     g = torch.Generator().manual_seed(int(seed) + 987654321)
     # low-frequency-ish noise so it isn't pure static: random blobs upsampled
     small = torch.rand((n_total, in_channels, max(4, hw // 4), max(4, hw // 4)),
@@ -114,7 +107,7 @@ def _pool_folder(n_total, in_channels, hw, seed, folder) -> torch.Tensor:
 
 
 def _pool_indist(n_total, in_channels, hw, seed, data_root, dataset) -> torch.Tensor:
-    """FedIPR IN-DISTRIBUTION triggers"""
+    """FedIPR in-distribution triggers"""
     import torchvision
     from torchvision import transforms
     name = (dataset or "cifar100").lower()
@@ -147,10 +140,7 @@ _PATCH_PALETTE = [(1., 0., 0.), (0., 1., 0.), (0., 0., 1.), (1., 1., 0.), (1., 0
 
 
 def _stamp_patch_(x: torch.Tensor, cid: int, hw: int) -> None:
-    """In-place BadNets trigger: a per-client solid patch (distinct colour + corner)
-    on in-distribution images. The patch is the separable feature the model keys on,
-    so the mark embeds fast; the in-distribution base keeps it alive through BN eval.
-    Distinct per client so 10 clients' (patch -> label) maps don't collide."""
+    """In-place BadNets trigger"""
     k = max(3, hw // 6)
     corners = [(0, 0), (0, hw - k), (hw - k, 0), (hw - k, hw - k)]
     r0, c0 = corners[cid % 4]
@@ -201,8 +191,7 @@ def build_client_triggersets(cids, num_trigger, num_classes, dataset,
     per = max(1, int(num_trigger))
     pool = build_trigger_pool(source, per * len(cids), in_channels, hw, seed,
                               data_root=data_root, folder=folder, dataset=dataset)
-    # in-distribution triggers get a per-client BadNets patch (applied on [0,1] images,
-    # BEFORE normalization) so the mark is separable and embeds; OOD sources are used raw.
+    # in-distribution triggers get a per-client BadNets patch (applied on [0,1] images, bef normalization)
     patch = ((source or "indist").lower() == "indist")
     out = {}
     for j, cid in enumerate(cids):

@@ -8,11 +8,7 @@ set -euo pipefail
 #     ATTACK=none FAMILY=t1_all_honest ./submit_experiment.sh 14 0
 #  Set DEBUG_HOLD=1 to keep the pod alive 1h after the run for inspection.
 # ===================================================
-# RUNAI_EXTRA: extra flags appended verbatim to `runai submit`. Use it to pin a GPU
-# type on a heterogeneous cluster (RCP has V100 / A100-40 / A100-80 / H100 / H200, so
-# wall-clock and gpu_ms are not comparable across jobs unless you pin), e.g.
-#   RUNAI_EXTRA="--node-pools a100-80" ./submit_experiment.sh 14 0
-# (check the pool names with: runai list node-pools)
+# RUNAI_EXTRA: extra flags appended verbatim to `runai submit`
 # NOTE: so far A100-80 have been used for experiments
 
 CONFIG_IDX="${1:-0}"
@@ -45,7 +41,7 @@ PY_EXTRA=""
 [ -n "${PARTITION:-}" ]        && PY_EXTRA="$PY_EXTRA --partition ${PARTITION}"
 # NUM_WORKERS: DataLoader workers. Default in run_experiment.py is 2
 [ -n "${NUM_WORKERS:-}" ]     && PY_EXTRA="$PY_EXTRA --num_workers ${NUM_WORKERS}"
-# speed levers (opt-in; unset => current behaviour). Set for a whole batch at manifest time.
+# speed levers (opt-in; unset => current behaviour)
 [ "${FAST_DATA:-0}" = "1" ]    && PY_EXTRA="$PY_EXTRA --fast_data"
 [ "${DETERMINISM:-1}" = "0" ]  && PY_EXTRA="$PY_EXTRA --no_determinism"
 [ -n "${DIRICHLET_ALPHA:-}" ]  && PY_EXTRA="$PY_EXTRA --dirichlet_alpha ${DIRICHLET_ALPHA}"
@@ -66,13 +62,14 @@ PY_EXTRA=""
 [ -n "${AUTOP_N_COMMON_CLASSES:-}" ] && PY_EXTRA="$PY_EXTRA --autop_n_common_classes ${AUTOP_N_COMMON_CLASSES}"
 # watermarking
 [ -n "${WATERMARK:-}" ]        && PY_EXTRA="$PY_EXTRA --watermark"
-# output-layer scheme selector + FedIPR backdoor knobs (unset => FareMark, unchanged)
+# output-layer scheme selector + FedIPR backdoor knobs 
 [ -n "${WM_SCHEME:-}" ]            && PY_EXTRA="$PY_EXTRA --wm_scheme ${WM_SCHEME}"
 [ -n "${FEDIPR_NUM_TRIGGER:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_num_trigger ${FEDIPR_NUM_TRIGGER}"
 [ -n "${FEDIPR_TRIGGER_SOURCE:-}" ] && PY_EXTRA="$PY_EXTRA --fedipr_trigger_source ${FEDIPR_TRIGGER_SOURCE}"
 [ -n "${FEDIPR_TRIGGER_DIR:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_trigger_dir ${FEDIPR_TRIGGER_DIR}"
 [ -n "${FEDIPR_TARGET_MODE:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_target_mode ${FEDIPR_TARGET_MODE}"
-# FedIPR feature-based SIGN watermark (white-box, output-layer)
+# FedIPR feature-based SIGN watermark (white-box, 1+ normalization layers)
+[ -n "${FEDIPR_SIGN_LAYERS:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_sign_layers ${FEDIPR_SIGN_LAYERS}"
 [ -n "${FEDIPR_SIGN_BITS:-}" ]    && PY_EXTRA="$PY_EXTRA --fedipr_sign_bits ${FEDIPR_SIGN_BITS}"
 [ -n "${FEDIPR_SIGN_MARGIN:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_sign_margin ${FEDIPR_SIGN_MARGIN}"
 [ -n "${FEDIPR_SIGN_LAMBDA:-}" ]  && PY_EXTRA="$PY_EXTRA --fedipr_sign_lambda ${FEDIPR_SIGN_LAMBDA}"
@@ -100,7 +97,7 @@ PY_EXTRA=""
 [ -n "${TAP_COAST_MODE:-}" ]   && PY_EXTRA="$PY_EXTRA --tap_coast_mode ${TAP_COAST_MODE}"
 [ -n "${TAP_PROBE_HOLDOUT:-}" ] && PY_EXTRA="$PY_EXTRA --tap_probe_holdout ${TAP_PROBE_HOLDOUT}"
 [ -n "${TAP_GRAFT_DECAY:-}" ] && PY_EXTRA="$PY_EXTRA --tap_graft_decay ${TAP_GRAFT_DECAY}"
-# dynamic adaptive-tap knobs (default to fixed behaviour if unset)
+# dynamic adaptive-tap knobs 
 [ -n "${TAP_MARGIN_MODE:-}" ]   && PY_EXTRA="$PY_EXTRA --tap_margin_mode ${TAP_MARGIN_MODE}"
 [ -n "${TAP_MARGIN_K:-}" ]      && PY_EXTRA="$PY_EXTRA --tap_margin_k ${TAP_MARGIN_K}"
 [ -n "${TAP_WARMUP_MODE:-}" ]   && PY_EXTRA="$PY_EXTRA --tap_warmup_mode ${TAP_WARMUP_MODE}"
@@ -108,20 +105,17 @@ PY_EXTRA=""
 [ -n "${TAP_CONV_PATIENCE:-}" ] && PY_EXTRA="$PY_EXTRA --tap_conv_patience ${TAP_CONV_PATIENCE}"
 [ -n "${TAP_HONEST_MIN:-}" ]    && PY_EXTRA="$PY_EXTRA --tap_honest_min ${TAP_HONEST_MIN}"
 [ -n "${TAP_WARMUP_CAP:-}" ]    && PY_EXTRA="$PY_EXTRA --tap_warmup_cap ${TAP_WARMUP_CAP}"
-# [ -n "${PAPER_FAITHFUL:-}" ]   && PY_EXTRA="$PY_EXTRA --paper_faithful"
 [ "${CALIB_ON_ALL:-0}" = "1" ] && PY_EXTRA="$PY_EXTRA --calib_on_all"
 # manifest (descriptive)
 [ -n "${FAMILY:-}" ]      && PY_EXTRA="$PY_EXTRA --manifest_family ${FAMILY}"
 [ -n "${SWEEP_VAR:-}" ]   && PY_EXTRA="$PY_EXTRA --sweep_var ${SWEEP_VAR}"
 [ -n "${SWEEP_LEVEL:-}" ] && PY_EXTRA="$PY_EXTRA --sweep_level ${SWEEP_LEVEL}"
 
-# Tag results/job uniquely.
+# Tag results/job uniquely
 # RUN_TAG (the output-dir name) 
-#   * via run_all.sh: FAMILY encodes dataset+bits+attack+partition+positions,
-#     the dir is exactly "<FAMILY>_rep<seed>_<ts>"
-#   * bare submit_experiment.sh (no FAMILY): assemble the tag from the knobs 
+#   * via run_all.sh: FAMILY encodes dataset+bits+attack+partition+positions, dir: "<FAMILY>_rep<seed>_<ts>"
 USER_TAG="${TAG:+_${TAG}}"
-FR_TAG=""                                 # always defined (JOB_NAME uses it under set -u)
+FR_TAG=""                                
 if [ -n "${FAMILY:-}" ]; then
   RUN_TAG="${FAMILY}${USER_TAG}_rep${REPEAT}"
 else
@@ -134,10 +128,7 @@ else
   FR_TAG="";    [ -n "${NUM_FREE_RIDERS:-}" ]   && FR_TAG="_fr${NUM_FREE_RIDERS}"
   RUN_TAG="${CORE}${BITS_TAG}${POS_TAG}${MAP_TAG}${FR_TAG}${ETA_TAG}${F_TAG}${USER_TAG}_rep${REPEAT}"
 fi
-# ---- DRYRUN: append to the pool manifest and stop -------------------------
-# One row per run: the pool splits this file across pods and each pod replays
-# the rows itself. RUN_TAG must be deterministic (see above) so a restarted pod
-# can skip rows whose result.json already exists.
+# ---- manifest -----
 if [ "$DRYRUN" = "1" ]; then
   printf '%s\t%s\t%s\t%s\t%s\n' \
     "$RUN_TAG" "$CONFIG_IDX" "$REPEAT" "${PY_EXTRA# }" "${NOTE:-}" >> "$JOBS_FILE"
@@ -145,14 +136,10 @@ if [ "$DRYRUN" = "1" ]; then
   exit 0
 fi
 
-# Per-dataset results subtree so a food101 run never overwrites a cifar100 one.
-# Prefer the dataset baked into PY_EXTRA (--dataset, set at manifest time and stored in
-# jobs.tsv), so the output path is right even if the pool doesn't export DATASET; fall
-# back to the env switch, then cifar100. Families are unchanged.
+# Per-dataset results subtree 
 DS_FROM_PY="$(printf '%s' "$PY_EXTRA" | sed -n 's/.*--dataset \([^ ]*\).*/\1/p')"
 DATASET="${DS_FROM_PY:-${DATASET:-cifar100}}"
-# cifar100 keeps the original flat path (back-compat with existing results); any other
-# dataset gets its own subtree so runs never collide.
+# cifar100 keeps the original flat path
 if [ "$DATASET" = "cifar100" ]; then
   OUTPUT_DIR="${MOUNT}/home/zu/results/${RUN_TAG}"
 else
@@ -179,8 +166,8 @@ runai submit "$JOB_NAME" \
     mkdir -p "$OUTPUT_DIR" "$DATA_ROOT"
     exec > >(tee "$OUTPUT_DIR/pod.log") 2>&1
     # ---- pod.log structure -------------------------------------------------
-    # pod.log is the environment record (what machine, what code, what flags);
-    # run.log is the experiment record; result.json is the data
+    # pod.log is the env record (what machine, what code, what flags);
+    # run.log is the exp record; result.json is the data
     echo "================================================================"
     echo "== POD =="
     echo "================================================================"
@@ -224,9 +211,7 @@ runai submit "$JOB_NAME" \
     set -u; set -e
     echo "================================================================"
     echo "== EXIT =="
-    # Exit 2 = accuracy outside the expected_acc band of the config. expected for
-    # attack runs (free-riders drag accuracy down) and result.json is already
-    # written. Only 1/3/>=4 are real failures
+    # Exit 2 = accuracy outside the expected_acc band of the config. expected for attack runs. Only 1/3/>=4 are real failures
     case "$EXIT" in
       0) echo "  exit 0  OK (accuracy inside expected band)" ;;
       2) echo "  exit 2  accuracy outside expected band -- normal for attack runs;"

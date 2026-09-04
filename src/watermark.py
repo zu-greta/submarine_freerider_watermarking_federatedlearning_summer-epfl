@@ -1,4 +1,4 @@
-"""Watermarking: box-free, output-space watermarking scheme 
+"""Watermarking: box-free, output-space watermarking scheme - faremark style
 
 The watermark of client i is an m-bit string B^i embedded into the model's
 softmax output on inputs of that client's trigger class. Nothing is read from

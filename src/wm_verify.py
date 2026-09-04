@@ -1,7 +1,7 @@
 """Server side: registration, extraction and detection
 
-The verification center registers every client's (trigger class, secret key, watermark bits). 
-Each round it extracts the watermark from each submitted model
+verification registers every client's (trigger class, secret key, watermark bits). 
+Each round, extracts the watermark from each submitted model
 using N_T trigger samples (Eq. 15) and computes the bit-error-rate (Eq. 16):
 
   * benign client   -> trained with L_wm  -> BER ~ 0          (watermark present)
@@ -15,7 +15,7 @@ import torch
 import torch.nn.functional as F
 
 from . import watermark as wm
-from . import watermark_fedipr_sign as wfs          
+from . import watermark_fedipr_sign as wfs        
 
 
 class WatermarkRegistry:
@@ -51,14 +51,13 @@ class WatermarkRegistry:
                                  # placeholders so any faremark-shaped reader is safe
                                  key=None, target_bits=None)
 
-    def register_fedipr_sign(self, cid, trigger_class, sign_E, sign_bits, carrier):
-        """FedIPR feature-based sign entry (WHITE-BOX): the client's secret embedding
-        matrix E_k, target bits B_k, and the carrier scale param name. The verifier
-        reads `carrier` from the submitted weights and checks sign(gamma . E) vs B."""
+    def register_fedipr_sign(self, cid, trigger_class, sign_E, sign_bits, carriers):
+        """FedIPR feature-based sign entry (white box): the client's per-carrier secret
+        matrices E_k (list), target bits B_k (list), + the ordered list of carrier scale param names"""
         self.scheme = "fedipr_sign"
         self.entries[cid] = dict(trigger_class=int(trigger_class), kind="fedipr_sign",
                                  alpha=None, exclude=None,
-                                 sign_E=sign_E, sign_bits=sign_bits, carrier=carrier,
+                                 sign_E=sign_E, sign_bits=sign_bits, carriers=list(carriers),
                                  # placeholders so any faremark-shaped reader is safe
                                  key=None, target_bits=None)
 
@@ -87,7 +86,7 @@ def build_trigger_bank(test_dataset, classes, n_triggers, seed=0):
 
 def build_trigger_bank_per_client(test_dataset, registry, n_triggers, seed=0):
     """Table IX from FareMark, held-out variant. Keyed by CID.
-    TODO: testing oversubscription
+    TODO: testing oversubscription - TBD
     """
     # cid -> class, and class -> [cids] (stable order so slices are reproducible)
     cls_of = {cid: e["trigger_class"] for cid, e in registry.entries.items()}
@@ -128,7 +127,7 @@ def build_trigger_bank_per_client(test_dataset, registry, n_triggers, seed=0):
 
 def build_trigger_bank_from_train(client_loaders, registry, n_triggers):
     """Table IX from FareMark, trigger sample consistency variant. Keyed by CID.
-    TODO: testing oversubscription (trigger sample consistency)
+    TODO: testing oversubscription (trigger sample consistency) - TBD
     """
     bank = {}
     for cid, e in registry.entries.items():
@@ -194,11 +193,9 @@ def make_verifier(registry, trigger_bank, verify_model, device,
                 continue
             # ================================================
 
-            # ======= FedIPR feature-based sign branch (WHITE-BOX) =======
-            # Read the carrier scale straight from the submitted weights (NO forward
-            # pass), extract sign(gamma . E) and compare to B_k. ber = Hamming/N.
+            # ======= FedIPR feature-based SIGN branch (WHITE-BOX) =======
             if scheme == "fedipr_sign":
-                ber = wfs.sign_ber_from_state(state, entry["carrier"],
+                ber = wfs.sign_ber_from_state(state, entry["carriers"],
                                               entry["sign_E"], entry["sign_bits"],
                                               device=device)
                 if ber is None:
@@ -241,22 +238,6 @@ def make_verifier(registry, trigger_bank, verify_model, device,
         else:
             eta_round = eta_floor
             eta_source = "floor_fallback"  # not calibrated, fallback
-
-        # ---- LEGACY (dead) live-threshold variants -------------------------------
-        # for reference only: live computed thresholds
-        #
-        # benign_now = [b for _, b, isfr, _ in measured if not isfr]
-        # calib_now = [b for _, b, _, _ in measured] if calib_on_all else benign_now
-        # if calib_now:
-        #     benign_history.append(sum(calib_now) / len(calib_now))
-        # if paper_faithful:
-        #     eta_round = (wm.calibrate_eta(benign_history, floor=eta_floor)
-        #                  if benign_history else eta_floor)          # cumulative mu+3sigma
-        # else:
-        #     recent = benign_history[-CAL_WINDOW:]
-        #     eta_round = (wm.calibrate_eta(recent, floor=eta_floor)
-        #                  if recent else eta_floor)                  # sliding-window mu+3sigma
-        # --------------------------------------------------------------------------
 
         benign_bers, fr_bers = [], []
         benign_flagged = fr_flagged = 0

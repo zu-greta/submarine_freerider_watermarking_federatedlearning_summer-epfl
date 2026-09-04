@@ -1,7 +1,7 @@
 """Per-client compute accounting 
 
 Measuring effort for attacks vs. honest clients
-This module gives every training client a meter that accumulates, per round and in total:
+accumulates per round and in total
 
   * fwd_passes / bwd_passes : # forward / backward calls (batch granularity)
   * samples                 : # training examples processed (sum of batch sizes)

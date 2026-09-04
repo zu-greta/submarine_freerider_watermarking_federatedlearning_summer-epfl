@@ -38,7 +38,7 @@ class ExpConfig:
     autop_common_per_class: int = -1        # DATA per tap: -1=full shard; 0=triggers-only; N=+N/common-class
     autop_n_common_classes: int = -1        # how many COMMON CLASSES the free-rider draws from: -1/0 = all of them; K>0 = K randomly chosen classes
 
-    # ---- adaptive tap free-rider  (attack="adaptive_tap", submarine attack)  ----
+    # ---- adaptive tap free-rider  (attack="adaptive_tap", submarine attack) -- appendix  ----
     # FR that trains only on rounds when its own BER nears the estimated eta.
     tap_eta_source: str = "oracle"   # eta FR aims under: "oracle" = given server eta. "self" = FR estimated from calib-window probe BER
     tap_eta_k: float = 3.0           # self mode: eta_hat = mu + k*sigma over the FR's own calib probe BERs
@@ -63,27 +63,28 @@ class ExpConfig:
 
     # ---- watermarking ----
     watermark: bool = False
-    # which OUTPUT-LAYER watermark scheme to embed/verify:
+    # which output layer watermark scheme to embed/verify:
     #   "faremark"    (default) = box-free softmax-projection BER scheme (src/watermark.py)
     #   "fedipr"                = FedIPR backdoor trigger-set scheme (src/watermark_fedipr.py)
-    #   "fedipr_sign"           = FedIPR feature-based sign watermark (WHITE-BOX),
-    #                             FORCED into the output layer (src/watermark_fedipr_sign.py)
+    #   "fedipr_sign"           = FedIPR feature-based sign watermark (white box) forced to output layer (src/watermark_fedipr_sign.py)
     wm_scheme: str = "faremark"
     # ---- FedIPR backdoor knobs ----
     fedipr_num_trigger: int = 40            # trigger images per client (repo default 40)
     fedipr_trigger_source: str = "indist"   # "indist" (real task imgs, BN-robust; default) | "svhn"/"noise" (OOD) | "folder"
     fedipr_trigger_dir: str = ""            # image folder when fedipr_trigger_source="folder"
     fedipr_target_mode: str = "cid"         # target label: "cid" (cid%%n) | "fixed" (=5) | "random"
-    # ---- FedIPR feature-based SIGN watermark knobs (wm_scheme="fedipr_sign", WHITE-BOX) ----
-    # The sign string is embedded in the SIGNS of a carrier scale vector and read
-    # white-box from the weights. The carrier is a SERVER CHOICE -> forces the layer.
-    fedipr_sign_bits: int = 40              # N: bits per client. Keep K*N <= carrier channels
-                                            #    (10 clients * 40 = 400 <= 512 -> feasible, low honest floor)
+    # ---- TODO test: FedIPR feature-based sign watermark knobs (wm_scheme="fedipr_sign", WHITE-BOX) ----
+    # The sign string is embedded in the signs of one + normalization scale vectors. read from weights
+    #   fedipr_sign_layers = 1  -> output layer only 
+    #   fedipr_sign_layers = N  -> the N output-most normalization scales
+    fedipr_sign_layers: int = 1             # num of carrier normalization layers (server config)
+    fedipr_sign_bits: int = 40              # bits per carrier layer 
     fedipr_sign_margin: float = 0.1         # hinge margin mu in the FedIPR sign-loss (Eq. 19)
     fedipr_sign_lambda: float = 1.0         # weight of the sign-loss added to the task loss
-    fedipr_sign_carrier: str = "auto_last_bn"  # carrier scale param. "auto_last_bn" = the OUTPUT-layer
-                                            #    scale (last BN, inside head2). A specific name (e.g.
-                                            #    "net.bn1.weight") forces a body layer -> robust contrast.
+    fedipr_sign_carrier: str = "auto_last_bn"  # which layers: "auto_last_bn" = the last
+                                            #    fedipr_sign_layers normalization scales (output->body);
+                                            #    "all_bn" = every normalization scale (full depth);
+                                            #    "a,b,c" = an explicit list of param names (forced).
     wm_bits: int = 0                        # m; 0 -> auto
     wm_balanced_keys: bool = False          # False = random +/-1 keys. True = sign-balanced rows 
     wm_trigger_assign: str = "roundrobin"   # trigger-class -> client assignment policy:

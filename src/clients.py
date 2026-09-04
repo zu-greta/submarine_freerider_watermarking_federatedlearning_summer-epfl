@@ -10,8 +10,8 @@ SECTION 3  ATTACKERS   _SimpleFRMixin, make_reduced_attack,
 
 Client                          honest FedAvg: load global -> local SGD -> return
     +-- WatermarkClient         ... + L_wm on trigger-class samples + Eq.14 memory update
-    +-- ReducedFreeRider        ... but trains on a reduced shard after round W
-    +-- AdaptiveTapFreeRider    ... the submarine: estimates eta, warmup rounds, coast/tap
+    +-- ReducedFreeRider        ... but trains on a reduced shard after round W (appendix)
+    +-- AdaptiveTapFreeRider    ... the submarine: estimates eta, warmup rounds, coast/tap (appendix)
     +-- GraftBlockFreeRider     ... train reduced on last layers only and keep global model body 
 """
 
@@ -96,7 +96,7 @@ class WatermarkClient(Client):
                  wm_scheme: str = "faremark",
                  fedipr_trig_x: torch.Tensor | None = None,
                  fedipr_trig_y: torch.Tensor | None = None,
-                 # ---- FedIPR feature-based sign watermark (white-box, output-layer) ----
+                 # ---- FedIPR white-box ----
                  sign_E: torch.Tensor | None = None,
                  sign_bits: torch.Tensor | None = None,
                  sign_carrier: str | None = None,
@@ -113,18 +113,18 @@ class WatermarkClient(Client):
         self.exclude = trigger_class if exclude == "trigger" else exclude
         self.memory: dict | None = None
         self.meter = ComputeMeter()
-        # ---- FedIPR backdoor scheme state ----
+        # ---- FedIPR backdoor ----
         self.wm_scheme = str(wm_scheme)
-        # trigger images embedded each round; the full registered set for an honest
-        # client, later re-sliced (train/holdout) by _SimpleFRMixin._prepare_fedipr.
         self._wm_trig_x = fedipr_trig_x
         self._wm_trig_y = fedipr_trig_y
         self._fedipr_full_x = fedipr_trig_x
         self._fedipr_full_y = fedipr_trig_y
-        # ---- FedIPR feature-based sign watermark state (wm_scheme="fedipr_sign") ----
-        self._sign_E = sign_E
-        self._sign_bits = sign_bits
-        self._sign_carrier = sign_carrier
+        # ---- FedIPR white box ----
+        self._sign_E = sign_E                          # list[Tensor] (one per carrier layer)
+        self._sign_bits = sign_bits                    # list[Tensor]
+        self._sign_carriers = (list(sign_carrier)
+                               if isinstance(sign_carrier, (list, tuple))
+                               else ([sign_carrier] if sign_carrier else None))
         self._sign_lambda = float(sign_lambda)
         self._sign_margin = float(sign_margin)
 
@@ -133,20 +133,20 @@ class WatermarkClient(Client):
         self.model.load_state_dict(global_state) # start from the global model
         self.meter.start_round(round_idx) # start timing the round
         if self.wm_scheme == "fedipr":
-            # FedIPR backdoor: task CE + trigger CE (alpha=1), plain FedAvg update
+            # FedIPR backdoor: task CE + trigger CE (alpha=1), FedAvg
             self._local_train_fedipr(round_idx)
             self.meter.end_round(trained=True)
             return _to_cpu_state(self.model), self.num_samples
         if self.wm_scheme == "fedipr_sign":
-            # FedIPR feature-based sign (WHITE-BOX): task CE + hinge sign-loss on output layer
+            # FedIPR white-box: task CE + sign loss on output layer, FedAvg
             self._local_train_fedipr_sign(round_idx)
             self.meter.end_round(trained=True)
             return _to_cpu_state(self.model), self.num_samples
-        self._local_train_wm(round_idx) # train L = L_cl + lambda * L_wm and log the two loss terms
+        self._local_train_wm(round_idx) # train L = L_cl + lambda * L_wm + log loss
         self.meter.end_round(trained=True) # end timing the round
-        w_sgd = _to_cpu_state(self.model) # get the SGD-updated model
-        w_new = self._memory_update(global_state, w_sgd) # memory-enhanced update
-        return w_new, self.num_samples # return the new model and the number of samples used for weighting
+        w_sgd = _to_cpu_state(self.model) # SGD-updated model
+        w_new = self._memory_update(global_state, w_sgd) # memory-enhanced update - faremark style
+        return w_new, self.num_samples # return new model + the num samples used for weighting
 
     # ---- L = L_cl + lambda * L_wm  (Eq. 11-12) -----------------------------
     def _local_train_wm(self, round_idx=None):
@@ -210,12 +210,8 @@ class WatermarkClient(Client):
 
     # ---- FedIPR backdoor embedding (L_task + CE(trigger -> target label)) ---
     def _local_train_fedipr(self, round_idx=None):
-        """FedIPR Alg.3 backdoor embed: trigger samples are concatenated into each
-        normal training batch (alpha=1), not trained in a separate pass. Mixing keeps
-        BatchNorm's batch statistics task-dominated, so the (input->target) mark the FC
-        learns still holds under eval-mode running stats. A trigger-only pass (what we
-        did before) computes BN stats from triggers alone -> the mark collapses at
-        verification. Under a scope freeze (attacker tap) only the unfrozen tensors move."""
+        """FedIPR backdoor: (trigger samples concatened)
+        Under a scope freeze (attacker tap) only unfrozen tensors move."""
         self.model.train()
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
@@ -251,7 +247,7 @@ class WatermarkClient(Client):
                         trig_total += K
                 if self.meter is not None and self.meter._cur is not None:
                     self.meter.record_batch(len(x))
-        # fallback: no task batches this round (e.g. trigger-only tap, cpc=0) -> triggers alone
+        # fallback: no task batches this round -> triggers alone
         if has_trig and not saw_task:
             bs = 16
             for _ in range(self.local_epochs):
@@ -277,30 +273,27 @@ class WatermarkClient(Client):
             "trigger_class": int(self.trigger_class),
         }
 
-    # ---- FedIPR feature-based SIGN embedding (WHITE-BOX, output-layer) --
+    # ---- FedIPR feature-based sign embedding (white box) --
     def _local_train_fedipr_sign(self, round_idx=None):
-        """FedIPR feature-based watermark: L = L_task(CE) + lambda * L_sign, where
-        L_sign is the hinge sign-loss (Eq. 19) driving sign(gamma . E_k) -> B_k on the
-        carrier scale vector `self._sign_carrier` (an output-layer scale, in head2).
-        """
+        """FedIPR feature-based watermark: L = L_task(CE) + lambda * L_sign, where L_sign is
+        the Pper-layer sign-loss driving sign(gamma_i . E_i) -> B_i on every carrier scale"""
         self.model.train()
         opt = torch.optim.SGD(self.model.parameters(), lr=self.lr,
                               momentum=self.momentum, weight_decay=self.weight_decay)
-        E, bits = self._sign_E, self._sign_bits
-        carrier = self._sign_carrier
+        Es, bits = self._sign_E, self._sign_bits
+        carriers = self._sign_carriers
         lam, margin = self._sign_lambda, self._sign_margin
         cl_sum = wm_sum = tot_sum = 0.0
         n_batches = 0
         saw_task = False
-        params = dict(self.model.named_parameters())
         for _ in range(self.local_epochs):
             for x, y in self.loader:                       # reduced loader for a FR tap; full shard honest
                 saw_task = True
                 x, y = x.to(self.device), y.to(self.device)
                 opt.zero_grad()
                 cl = F.cross_entropy(self.model(x), y, label_smoothing=self.label_smoothing)
-                gamma = params[carrier]                    # live carrier scale (requires grad)
-                wml = wfs.sign_embed_loss(gamma, E, bits, margin)
+                gammas = wfs.gather_gammas_params(self.model, carriers)  # live carrier scales
+                wml = wfs.sign_embed_loss(gammas, Es, bits, margin)
                 loss = cl + lam * wml
                 loss.backward()
                 if not torch.isfinite(loss):
@@ -311,33 +304,35 @@ class WatermarkClient(Client):
                 tot_sum += float(loss.detach()); n_batches += 1
                 if self.meter is not None and self.meter._cur is not None:
                     self.meter.record_batch(len(x))
-        # fallback: no task batches this round (e.g. cpc=0) -> embed the sign string alone
+        # fallback: no task batches this round -> embed the sign string alone
         if not saw_task:
             for _ in range(max(1, self.local_epochs)):
                 opt.zero_grad()
-                gamma = dict(self.model.named_parameters())[carrier]
-                wml = lam * wfs.sign_embed_loss(gamma, E, bits, margin)
+                gammas = wfs.gather_gammas_params(self.model, carriers)
+                wml = lam * wfs.sign_embed_loss(gammas, Es, bits, margin)
                 wml.backward()
                 if torch.isfinite(wml):
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                     opt.step()
                 wm_sum += float(wml.detach()); tot_sum += float(wml.detach()); n_batches += 1
-        # log per-round losses + the current white-box sign BER (mark strength)
+        # log per-round losses + the current white-box sign BER 
         with torch.no_grad():
-            cur_ber = wfs.sign_ber(dict(self.model.named_parameters())[carrier].detach(),
-                                   E, bits)
+            cur_ber = wfs.sign_ber(
+                [g.detach() for g in wfs.gather_gammas_params(self.model, carriers)],
+                Es, bits)
         if not hasattr(self, "wm_stats"):
             self.wm_stats = {}
         self.wm_stats[int(round_idx) if round_idx is not None else len(self.wm_stats)] = {
             "cls_loss": round(cl_sum / max(n_batches, 1), 5),
             "wm_loss": round(wm_sum / max(n_batches, 1), 5),
             "total_loss": round(tot_sum / max(n_batches, 1), 5),
-            "trig_train_acc": round(1.0 - cur_ber, 4),     # = 1 - sign BER (mark present-ness)
-            "n_trigger_samples": int(len(bits)),           # N sign bits
+            "trig_train_acc": round(1.0 - cur_ber, 4),     # = 1 - sign BER 
+            "n_trigger_samples": int(sum(len(b) for b in bits)),   # total sign bits
+            "n_carriers": int(len(carriers)),              # num normalization layers carrying mark
             "trigger_class": int(self.trigger_class),
         }
 
-    # ---- memory-enhanced update (Eq. 14) -----------------------------------
+    # ---- memory-enhanced update (faremark) -----------------------------------
     def _memory_update(self, global_state: dict, w_sgd: dict) -> dict:
         """W_new = beta*(memory + delta) + (1-beta)*global, delta = W_sgd - global"""
         beta = self.wm_beta
@@ -345,12 +340,12 @@ class WatermarkClient(Client):
         if self.memory is None:
             self.memory = {k: v.clone() for k, v in global_state.items()}
         w_new = {}
-        # update each parameter: if it's floating-point, do the memory-enhanced update; else just copy it
-        for k, vg in global_state.items():
+        # update each parameter
+        for k, vg in global_state.items(): # if it's floating-point, do the memory-enhanced update
             if torch.is_floating_point(vg):
                 delta = w_sgd[k] - vg
                 w_new[k] = beta * (self.memory[k] + delta) + (1.0 - beta) * vg
-            else:
+            else: # just copy it
                 w_new[k] = w_sgd[k].clone()
         # update the memory to the new model for the next round
         self.memory = {k: v.clone() for k, v in w_new.items()}
@@ -428,12 +423,12 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     scheme = str(getattr(cfg, "wm_scheme", "faremark"))
 
     # random (unbalanced) keys, full softmax (no trigger-class exclusion), m = n//10
-    PF_GROUP = 10                                  # TODO hardcoded: bits-per-class divisor (m = num_classes // 10)
+    PF_GROUP = 10                                  # Note hardcoded: bits-per-class divisor (m = num_classes // 10)
     m = cfg.wm_bits or max(2, num_classes // PF_GROUP)
     # exclude_col controls whether the trigger-class column is dropped from the watermark projection. DEFAULT None = full softmax (faremark paper)
     if bool(getattr(cfg, "wm_exclude_trigger", False)):
         exclude_col = "trigger"                    # per-client -> its own trigger_class
-        l = wm.grouping(num_classes - 1, m)        # ablation: fit projection into n-1 columns
+        l = wm.grouping(num_classes - 1, m)        # ablation? fit projection into n-1 columns
     else:
         exclude_col = None                         # full softmax (no trigger-class exclusion)
         l = wm.grouping(num_classes, m)
@@ -475,10 +470,10 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     registry.trigger_holdings = {}      # cid -> #images of its trigger class in its shard
     registry.shard_sizes = {}           # cid -> total shard size
 
-    # ---- FedIPR: build every client's private OOD trigger set up front -------
+    # ---- FedIPR: build every client's private OOD trigger set -------
     fedipr_sets = {}
     if scheme == "fedipr":
-        # infer input geometry from a data sample 
+        # input geometry from a data sample 
         in_ch, hw = 3, 32
         for _x, _y in client_loaders[0]:
             in_ch, hw = int(_x.shape[1]), int(_x.shape[2]); break
@@ -490,23 +485,28 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
             data_root=data_root, folder=getattr(cfg, "fedipr_trigger_dir", "") or None)
         registry.scheme = "fedipr"
 
-    # ---- FedIPR SIGN (white-box): resolve the output layer carrier + per-client secrets --
+    # ---- FedIPR SIGN (white-box): carrier LAYER(S) + per-client secrets --
     sign_sets = {}
-    sign_carrier_name = None
+    sign_carrier_names = None
     if scheme == "fedipr_sign":
-        # server chooses the carrier: default output-layer scale (head2).
-        sign_carrier_name = wfs.resolve_carrier_name(
-            model, str(getattr(cfg, "fedipr_sign_carrier", "auto_last_bn")))
-        C = wfs.carrier_num_channels(model, sign_carrier_name)
-        n_bits = int(getattr(cfg, "fedipr_sign_bits", 40))
-        if len(client_loaders) * n_bits > C:
-            import warnings
-            warnings.warn(f"[fedipr_sign] K*N = {len(client_loaders)}*{n_bits} > carrier "
-                          f"channels {C}: capacity exceeded (FedIPR Thm.1), honest BER "
-                          f"floor will rise. Lower fedipr_sign_bits or pick a wider carrier.")
-        sign_sets = wfs.build_client_signsets(range(len(client_loaders)), n_bits, C, seed)
+        # server config for num/which
+        # 1 => output-layer only (fragile); >1 spreads into the body (beats the head2 free-rider); "all_bn" => full depth.
+        sign_carrier_names = wfs.resolve_carrier_names(
+            model, str(getattr(cfg, "fedipr_sign_carrier", "auto_last_bn")),
+            int(getattr(cfg, "fedipr_sign_layers", 1)))
+        channels = wfs.per_carrier_channels(model, sign_carrier_names)
+        bits_list = wfs.plan_bits(channels, int(getattr(cfg, "fedipr_sign_bits", 40)),
+                                  len(client_loaders))
+        sign_sets = wfs.build_client_signsets(range(len(client_loaders)),
+                                              channels, bits_list, seed)
         registry.scheme = "fedipr_sign"
-        registry.sign_carrier = sign_carrier_name
+        registry.sign_carrier = sign_carrier_names            # list of names 
+        registry.sign_bits_per_layer = list(bits_list)
+        registry.sign_total_bits = int(sum(bits_list))
+        import warnings
+        warnings.warn(f"[fedipr_sign] carriers={len(sign_carrier_names)} "
+                      f"bits/layer={bits_list} (total {sum(bits_list)}) "
+                      f"names={sign_carrier_names}")
 
     clients, unembed = [], []
     # build each client with its trigger class, key, and target bits
@@ -514,8 +514,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
         # ---- FedIPR backdoor: target label + private OOD trigger set ----
         if scheme == "fedipr":
             ts = fedipr_sets[cid]
-            trigger_class = int(ts["target"])   # target label (kept in trigger_class so plots group)
-            key = bits = None
+            trigger_class = int(ts["target"])   # target label 
             unembed.append(0.0)
             registry.register_fedipr(cid, trigger_class, ts["x"], ts["y"])
             registry.trigger_holdings[cid] = int(len(ts["x"]))
@@ -523,29 +522,28 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
             fedipr_kw = dict(wm_scheme="fedipr",
                              fedipr_trig_x=ts["x"], fedipr_trig_y=ts["y"])
         elif scheme == "fedipr_sign":
-            # ---- FedIPR feature-based sign (WHITE-BOX): secret E_k, B_k, carrier ----
+            # ---- FedIPR feature-based sign (white box): per-carrier secret E_k, B_k ----
             ss = sign_sets[cid]
-            trigger_class = cid % num_classes   # no real trigger class - for plotting
+            trigger_class = cid % num_classes   # for plot grouping
             key = bits = None
             unembed.append(0.0)
             registry.register_fedipr_sign(cid, trigger_class, ss["E"], ss["bits"],
-                                          sign_carrier_name)
-            registry.trigger_holdings[cid] = int(len(ss["bits"]))   # = N sign bits
+                                          sign_carrier_names)
+            registry.trigger_holdings[cid] = int(sum(len(b) for b in ss["bits"]))  # total sign bits
             registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
             fedipr_kw = dict(wm_scheme="fedipr_sign", sign_E=ss["E"], sign_bits=ss["bits"],
-                             sign_carrier=sign_carrier_name,
+                             sign_carrier=sign_carrier_names,
                              sign_lambda=float(getattr(cfg, "fedipr_sign_lambda", 1.0)),
                              sign_margin=float(getattr(cfg, "fedipr_sign_margin", 0.1)))
         else:
-            # priority: explicit map > distribution assignment > round-robin
+            # explicit map > distribution assignment > round-robin
             if cid in tmap:
                 trigger_class = tmap[cid]
             elif cid in dist_assign:
                 trigger_class = dist_assign[cid]
             else:
                 trigger_class = cid % num_classes
-            # key balance config: balanced=True removes structurally-unembeddable same-sign rows
-            bal = bool(getattr(cfg, "wm_balanced_keys", False))
+            bal = bool(getattr(cfg, "wm_balanced_keys", False)) # keep false
             key = wm.make_key(m, l, seed=seed + 1000 * cid + 1, balanced=bal)
             unembed.append(wm.unembeddable_fraction(key)) # compute the fraction of same-sign rows (structurally unembeddable)
             bits = wm.make_bits(m, seed=seed + 1000 * cid + 1) # random target bits for the watermark
@@ -608,7 +606,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     honest_min=getattr(cfg, "tap_honest_min", 6),
                     warmup_cap=getattr(cfg, "tap_warmup_cap", 15),
                     **wm_args, **common))
-            # graftblock attack (group L): reduced + scope-limited (+ optional graft)
+            # graftblock attack (group L): reduced + scope-limited -- graft dropped
             elif attack == "graftblock":
                 cls = make_graftblock_attack(WatermarkClient)
                 clients.append(cls(
@@ -646,8 +644,8 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
         # no key geometry; report trigger-set size so logs/results stay populated
         registry.m, registry.l = int(getattr(cfg, "fedipr_num_trigger", 40)), 1
     elif scheme == "fedipr_sign":
-        # m = N sign bits per client; l=1 
-        registry.m, registry.l = int(getattr(cfg, "fedipr_sign_bits", 40)), 1
+        # m = TOTAL sign bits per client across all carriers; l=1.
+        registry.m, registry.l = int(getattr(registry, "sign_total_bits", 0)), 1
     else:
         registry.m, registry.l = m, l
     registry.unembeddable_frac = round(frac, 4)
@@ -665,7 +663,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 # ----------------------------------------------------------------------------
-# 3a. ATTACK BASELINES -- from FareMark paper
+# 3a. ATTACK BASELINES 
 # ----------------------------------------------------------------------------
 # Fabricate weights from the global history and never train:
 #   PreviousModelsFreeRider (Eq. 17)  W_free = 2*W_t - W_{t-1}
@@ -869,7 +867,7 @@ class _SimpleFRMixin:
         bs = getattr(self._orig_loader, "batch_size", 16) or 16
         fx = getattr(self, "_fedipr_full_x", None)
         fy = getattr(self, "_fedipr_full_y", None)
-        if fx is None:                                   # fall back to whatever was set
+        if fx is None:                                   # fall back to wtvs was set
             fx, fy = self._wm_trig_x, self._wm_trig_y
         n_trig = 0 if fx is None else len(fx)
         MIN_TRAIN_TRIG = 8
@@ -889,8 +887,7 @@ class _SimpleFRMixin:
         # the embed slice consumed by _local_train_fedipr on a tap
         self._wm_trig_x, self._wm_trig_y = trig_train_x, trig_train_y
 
-        # reduced task loader: N images per class from the shard (keeps the main
-        # task from drifting while the head re-embeds). cpc<=0 -> trigger-only tap.
+        # reduced task loader: N images per class from the shard 
         if common_per_class > 0:
             comm_x, comm_y = [], []
             for x, y in self._orig_loader:
@@ -952,8 +949,8 @@ class _SimpleFRMixin:
         """BER of this client's mark in `state`.
         used by the adaptive-tap free-rider to decide whether to coast or tap."""
         if getattr(self, "wm_scheme", "faremark") == "fedipr_sign":
-            # WHITE-BOX: read the carrier scale straight from the submitted weights.
-            return wfs.sign_ber_from_state(state, self._sign_carrier,
+            # white box: read every carrier scale straight from the submitted weights.
+            return wfs.sign_ber_from_state(state, self._sign_carriers,
                                            self._sign_E, self._sign_bits, device="cpu")
         if getattr(self, "wm_scheme", "faremark") == "fedipr":
             if getattr(self, "_probe_x", None) is None:
@@ -1036,7 +1033,7 @@ def make_reduced_attack(base_cls):
 
 
 # ------------------------------------------------------------------------------ #
-#  Adaptive Tap Attack: the submarine (attack="adaptive_tap")                    #  
+#  Adaptive Tap Attack: the submarine (attack="adaptive_tap")  -- appendix       #  
 #  honest, then train (reduced) when nearing (estimated) threshold               #
 #    - threshold estimation ...... tap_eta_source ("oracle" | "self"), tap_eta_k
 #    - when to tap ............... tap_when ("threshold" | "always" | "every_k"),
@@ -1329,7 +1326,7 @@ def make_adaptive_tap_attack(base_cls):
     return AdaptiveTapFreeRider
 
 # ------------------------------------------------------------------------------ #
-#  Final block Attack (group L):                         
+#  Final layers Attack (group L):  -- our attack                       
 #  honest warmup, then every free-ride round: train only the last layers on a
 #  reduced shard (cpc)
 #    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it)
@@ -1341,14 +1338,12 @@ def make_graftblock_attack(base_cls):
         is_free_rider = True
         attack_name = "graftblock"
         # ---- SCOPE = trailing parameter tensors stay trainable ----
-        # ResNet-18 has 62 named parameter tensors (~11.2M scalars)
-        # keep the outer layers trainable and freeze earlier layers - at global model
+        # ResNet-18: 62 named parameter tensors. freeze earlier layers at global model
         #   "head2"  keep = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
         #                          fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
         #            = the SOFTMAX/OUTPUT layer (fc) + the conv layer right before
-        #   "block2" keep = 20 -> the last ~2.5 residual blocks + fc, ~9.04M scalars
-        #            (~80% of the model). - legacy
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
+        # note: other scopes dropped
 
         def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,
                      calib_rounds: int = 4, scope: str = "head2", graft: bool = False,
@@ -1393,7 +1388,7 @@ def make_graftblock_attack(base_cls):
                 submit, n = super().produce_update(global_state, prev_global_state, round_idx)
                 self.trace.append({"round": round_idx, "action": phase, "eta_frozen": None})
                 return submit, n
-            # free-ride: reduced shard + scope-limited training (+ optional graft)
+            # free-ride: reduced shard + scope-limited training (+ optional graft -- ignore)
             self._prepare(max(0, self.common_per_class),
                           n_common_classes=self.n_common_classes,
                           trigger_train_n=self.trigger_train_n)

@@ -2,15 +2,11 @@
 # =============================================================================
 # runbook.sh -- entry point 
 #
-#   ./runbook.sh help          print the phase order
-#   ./runbook.sh probe         0. embedding sanity check (gates paper rows)
 #   ./runbook.sh manifest      1. build jobs.tsv for the next batch (run_now.sh)
 #   ./runbook.sh submit        2. run the pool (PODS x WORKERS, submit_pool.sh)
-#   ./runbook.sh monitor       3. watch progress
-#   ./runbook.sh plot          4. ALL figures (plots.py, organised by group)
-#   ./runbook.sh grade         5. paper_check tables (optional, paper-repro rows)
+#   ./runbook.sh plot          4. figures (plots.py)
 #
-# Knobs (env): BATCH, PODS, WORKERS, RES, OUT, FAST_DATA(1), DETERMINISM(0)
+# Knobs (env): BATCH, PODS, WORKERS, RES, OUT
 #
 #   BATCH=<> ./runbook.sh manifest 
 #   WORKERS=<> PODS=<> BATCH=<> ./runbook.sh submit      
@@ -20,23 +16,21 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; cd "$HERE"
 
 # ===================== DATASET SWITCH =====================
-# The whole run (manifest -> submit -> plot) uses this dataset
-#   cifar100 (default) | cifar10 | mnist
-#   food101  = ETH-Zurich Food-101 (101 cls, torchvision auto-download ~5 GB)
+# dataset config
+#   cifar100 (default) | cifar10 | mnist | food101
 export DATASET="${DATASET:-cifar100}"
-export FOOD_SIZE="${FOOD_SIZE:-64}"        # Food-101 input resolution (food101 only)
+export FOOD_SIZE="${FOOD_SIZE:-64}"        
 
 # ---- batch selection --------------------------------------------------------
 # Default = A
 BATCH="${BATCH:-A}"   # whole tokens, space/comma separated: "H T EA"
-PAPER_OK="${PAPER_OK:-0}"          # 1 = also build probe-gated paper rows (grade phase)
+PAPER_OK="${PAPER_OK:-0}"         
 FAST_DATA="${FAST_DATA:-1}"        # 1 = GPU-resident loaders (kills DataLoader fork storms)
 DETERMINISM="${DETERMINISM:-0}"    # 0 = cuDNN autotuner on (~1.3-2x; stat. identical over seeds)
 PODS="${PODS:-2}"; WORKERS="${WORKERS:-6}"
 MPS="${MPS:-1}"
 
-# Per-dataset results tree. cifar100 keeps the original flat path (back-compat); other
-# datasets get their own subtree (matches submit_experiment.sh's OUTPUT_DIR).
+# Per-dataset results tree. cifar100 keeps the original flat path (back-compat)
 if [ "$DATASET" = "cifar100" ]; then
   RES="${RES:-/mnt/nfs/home/zu/results}"
 else
@@ -48,40 +42,24 @@ ALL="$RES/*/result.json"
 # ---- frozen references for plotting ----
 HON=A1_honest_c100                 # honest calibration family (IID, c100, 10 clients)
 HONCLASS="${HONCLASS:-A1_honest_c100}"   # all-honest family for the class-acc bar chart
-ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose
+ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose - for reference only TBD
 ETA_T_NIID="0.161"; ETA_L_NIID="0.576"   # non-IID eta tight / loose
 # ---- FedIPR backdoor (group F) frozen references ----
 HON_FI="${HON_FI:-F_A1_honest_c100_fi}"        # FedIPR honest calibration family (IID, c100)
-# ber_fedipr = 1 - trigger_acc; honest floor ~ 0. These are PROVISIONAL -- recalibrate
-# eta_tight = mu+3sigma of F_A1 honest ber (like ETA_T=0.064 for FareMark), then set here.
+# ber_fedipr = 1 - trigger_acc; honest floor ~ 0; chance = 0.99 
 ETA_T_FI="${ETA_T_FI:-0.20}"; ETA_L_FI="${ETA_L_FI:-0.50}"   # FedIPR eta tight / loose
 # ---- FedIPR SIGN / white-box (group G) frozen references ----
 HON_WS="${HON_WS:-G_A1_honest_c100_ws}"        # FedIPR-sign honest calibration family (IID, c100)
-# ber_sign = Hamming(sign(gamma.E),B)/N; honest floor ~ 0, chance = 0.5 (like FareMark).
-# PROVISIONAL -- recalibrate eta_tight = mu+3sigma of G_A1 honest ber, then set here.
+# ber_sign = Hamming(sign(gamma.E),B)/N; honest floor ~ 0, chance = 0.5 
 ETA_T_WS="${ETA_T_WS:-0.20}"; ETA_L_WS="${ETA_L_WS:-0.50}"   # FedIPR-sign eta tight / loose
 
-PL="python ../scripts/plots.py"   
-PC="python ../scripts/paper_check.py"
+PL="python ../scripts/plots.py"
+TP="python ../scripts/to_pgfplots.py"     # paper figures/table -> pgfplots (Overleaf)
+EXPORT="${EXPORT:-$HERE/export}"           # where the .dat/.tex land
+TAIL="${TAIL:-20}"                         # converged-tail window (final-BER, bands)
 run(){ echo "== $*"; eval "$*" || echo "   (skipped -- family may not exist yet)"; }
 
 # ---------------------------------------------------------------------------
-phase_probe(){
-  echo ">>> PROBE: embedding sanity (watch run.log: ber_h should drop, pmax not nan)"
-  NUM_WORKERS=0 FAMILY=probe_fix WM_BITS=2 WM_NUM_TRIGGERS=50 ROUNDS=25 \
-      ./submit_experiment.sh 11 0
-}
-
-phase_probe_fedipr(){
-  # FedIPR honest gate: a short honest run must embed the backdoor (ber = 1-trigacc LOW).
-  echo ">>> FEDIPR PREFLIGHT: ${PROBE_ROUNDS:-6} honest rounds (indist), assert honest ber < ${FPROBE_MAX:-0.2}"
-  WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE="${FEDIPR_TRIGGER_SOURCE:-indist}" \
-    FEDIPR_NUM_TRIGGER="${FEDIPR_NUM_TRIGGER:-40}" FEDIPR_TARGET_MODE="${FEDIPR_TARGET_MODE:-cid}" \
-    ATTACK=none NUM_FREE_RIDERS=0 ROUNDS="${PROBE_ROUNDS:-6}" FAMILY=fedipr_probe \
-    NOTE="fedipr preflight honest (indist)" ./submit_experiment.sh 14 0
-  python ../scripts/preflight_fedipr.py --in "$RES/fedipr_probe_rep0/result.json" --max "${FPROBE_MAX:-0.2}"
-}
-
 phase_manifest(){
   echo ">>> MANIFEST: groups=[$BATCH] PAPER_OK=$PAPER_OK FAST_DATA=$FAST_DATA DETERMINISM=$DETERMINISM"
   rm -f jobs.tsv
@@ -95,23 +73,33 @@ phase_submit(){
   [ "$MPS" = "1" ] && echo "   (MPS=1: start nvidia-cuda-mps-control -d in each pod before the workers)"
   unset DRYRUN
   WORKERS="$WORKERS" PODS="$PODS" ./submit_pool.sh
-  echo "   monitor with:  ./runbook.sh monitor"
-}
-
-phase_monitor(){
-  echo ">>> MONITOR"
-  run "runai list jobs"
-  echo "--- quick digest of whatever has landed ---"
-  run "python ../scripts/resultio.py digest --in '$ALL'"
-  echo "--- speed: seconds/round (last col) ---"
-  run "for d in $RES/*/run.log; do echo \"\$d:\"; awk '\$2==\"R\" && \$3 ~ /^[0-9]/ {print \$3, \$NF}' \"\$d\" | tail -3; done"
+  echo "  monitor using runai list jobs or on the cluster - check the RES folder and pods"
 }
 
 # ---------------------------------------------------------------------------
-# 4. ALL FIGURES. eta frozen
+# 4. PAPER figures + table -> pgfplots 
+#    fig1 (faremark+fedipr timelines) / tab1 (costs) / fig2 (attack compare) /
+#    fig3 (class difficulty) / fig4 (layer sweep). All 3-seed, std shown.
 # ---------------------------------------------------------------------------
 phase_plot(){
-  mkdir -p "$OUT"; echo ">>> PLOT -> $OUT"
+  mkdir -p "$EXPORT"; echo ">>> PAPER FIGURES -> $EXPORT  (pgfplots via to_pgfplots.py)"
+  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL"
+  echo "   done. \\input plots/export/fig/*.tex ; menu: $EXPORT/all_figures.tex"
+  echo "   (Overleaf: see $EXPORT/README_OVERLEAF.md and preamble_snippet.tex)"
+}
+
+# appendix set (non-IID / other datasets / overlaps / savings). Off by default.
+phase_appendix(){
+  mkdir -p "$EXPORT"; echo ">>> APPENDIX FIGURES -> $EXPORT"
+  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL --appendix"
+  echo "   menu: $EXPORT/all_figures_appendix.tex"
+}
+
+# ---------------------------------------------------------------------------
+# LEGACY: extra plots
+# ---------------------------------------------------------------------------
+phase_plot_legacy(){
+  mkdir -p "$OUT"; echo ">>> PLOT (legacy matplotlib) -> $OUT"
 
   # ===================== GROUP A -- honest baseline =========================
   run "$PL honest_lines     --in '$ALL' --family $HON --tail 20 --out $OUT/A1_class_floors"
@@ -343,40 +331,47 @@ phase_plot(){
   for fam in $G_C36 $G_C17; do GFR="$GFR '$RES/${fam}_rep*/result.json'"; done
   run "$PL overlap --in '$ALL' --families $HON_WS --fr_in $GFR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_overlap_band_vs_fr"
 
-  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box)"
+  # ---- LAYER SWEEP: "more layers beats the free-rider" (NL = 1,2,4,...) --------
+  # Per NL: honest-vs-FR timeline (FR ber climbs above the honest floor as NL grows)
+  GSWEEP_FR=""
+  for NL in ${SIGN_LAYERS_SWEEP:-1 2 4}; do
+    HON_NL="G_A1_honest_c100_ws_L${NL}"
+    FR_NL="G_L1_graftblock_head2_c36_ws_L${NL}"
+    run "$PL timeline    --in '$ALL' --family $FR_NL --honest_in '$ALL' --honest_family $HON_NL --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_layers_timeline_L${NL}"
+    run "$PL tap_perfr   --in '$ALL' --family $FR_NL --honest_in '$ALL' --honest_family $HON_NL --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_layers_tap_L${NL}"
+    for cls in 3 6; do
+      run "$PL iso_pair --honest_in '$RES/${HON_NL}_rep*/result.json' --fr_in '$RES/${FR_NL}_rep*/result.json' --class $cls --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_layers_iso_L${NL}_c${cls}"
+    done
+    GSWEEP_FR="$GSWEEP_FR '$RES/${FR_NL}_rep*/result.json'"
+  done
+  # one axis: FR BER vs #layers (should rise from ~0 at NL=1 to caught at NL>1) vs the NL=1 honest floor.
+  run "$PL overlap --in '$ALL' --families G_A1_honest_c100_ws_L1 --fr_in $GSWEEP_FR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_layers_overlap"
+
+  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box + layer sweep)"
 }
 
-phase_grade(){
-  # optional paper-reproduction tables (needs the probe-gated paper rows, PAPER_OK=1).
-  echo ">>> GRADE vs the FareMark paper (optional; needs paper-repro families)"
-  run "$PC --row t9 --in '$ALL' --family F3_tableIX_c10_nc50 --heldout-family F3_tableIX_c10_nc50_heldout"
-  run "$PC --row c10 --in '$ALL' --family H1_honest_c10"
-}
 
 case "${1:-help}" in
-  probe)         phase_probe ;;
-  probe-fedipr)  phase_probe_fedipr ;;
   manifest)  phase_manifest ;;
   submit)    phase_submit ;;
-  monitor)   phase_monitor ;;
   plot)      phase_plot ;;
-  grade)     phase_grade ;;
-  all-submit) phase_probe; phase_manifest; phase_submit ;;   # 0 -> 1 -> 2
+  paper)     phase_plot ;;        # alias: paper figures + table (pgfplots)
+  appendix)  phase_appendix ;;    # appendix figure set (pgfplots)
+  plot-legacy) phase_plot_legacy ;;   # dormant: old full matplotlib suite
+  all-submit) phase_manifest; phase_submit ;;   # 1 -> 2
   *)
     cat <<USAGE
 runbook.sh -- run phases 
 
   ON THE CLUSTER (has submit_experiment.sh + .env):
-    ./runbook.sh probe          0. FareMark embedding sanity
-    ./runbook.sh probe-fedipr   0b. FedIPR honest gate (asserts honest ber < 0.2; run before BATCH=F)
     ./runbook.sh manifest    1. build jobs.tsv     (BATCH=$BATCH)
     ./runbook.sh submit      2. run the pool       (PODS=$PODS WORKERS=$WORKERS)
-    ./runbook.sh monitor     3. progress
        ... wait for jobs to finish ...
 
   LOCALLY (set RES=~/local/results):
-    RES=~/local/results ./runbook.sh plot     4. ALL figures
-    RES=~/local/results ./runbook.sh grade    5. paper tables (optional)
+    RES=~/local/results ./runbook.sh plot     4. PAPER figures+table -> pgfplots (export/)
+    RES=~/local/results ./runbook.sh appendix 4b. appendix figure set (pgfplots)
+    (plot-legacy = the old full matplotlib PNG suite, dormant)
 
   batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G .
      (F = FedIPR backdoor, 2nd output-layer scheme; G = FedIPR SIGN white-box, 3rd
