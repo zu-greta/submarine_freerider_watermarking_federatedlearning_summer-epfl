@@ -54,8 +54,10 @@ HON_WS="${HON_WS:-G_A1_honest_c100_ws}"        # FedIPR-sign honest calibration 
 ETA_T_WS="${ETA_T_WS:-0.20}"; ETA_L_WS="${ETA_L_WS:-0.50}"   # FedIPR-sign eta tight / loose
 
 PL="python ../scripts/plots.py"
-TP="python ../scripts/to_pgfplots.py"     # paper figures/table -> pgfplots (Overleaf)
-EXPORT="${EXPORT:-$HERE/export}"           # where the .dat/.tex land
+TP="python ../scripts/to_pgfplots.py"      # paper figures/table -> pgfplots (Overleaf)
+MP="python ../scripts/paper_figs_mpl.py"   # paper figures/table -> matplotlib (PNG/PDF)
+EXPORT="${EXPORT:-$RES/export}"            # where the .dat/.tex land
+FIGS="${FIGS:-$RES/figs}"                  # where the matplotlib PNG/PDF land
 TAIL="${TAIL:-20}"                         # converged-tail window (final-BER, bands)
 run(){ echo "== $*"; eval "$*" || echo "   (skipped -- family may not exist yet)"; }
 
@@ -77,15 +79,19 @@ phase_submit(){
 }
 
 # ---------------------------------------------------------------------------
-# 4. PAPER figures + table -> pgfplots 
-#    fig1 (faremark+fedipr timelines) / tab1 (costs) / fig2 (attack compare) /
-#    fig3 (class difficulty) / fig4 (layer sweep). All 3-seed, std shown.
+# 4. PAPER figures + table -> pgfplots (Overleaf) + matplotlib (PNG/PDF)
+#    Same set in both: fig1 (faremark/fedipr/sign timelines) / tab1 (costs) /
+#    fig2 (attack compare) / fig3 (class difficulty) / fig4 (layer sweep).
+#    All 3-seed, std shown. 
 # ---------------------------------------------------------------------------
 phase_plot(){
-  mkdir -p "$EXPORT"; echo ">>> PAPER FIGURES -> $EXPORT  (pgfplots via to_pgfplots.py)"
+  mkdir -p "$EXPORT" "$FIGS"
+  echo ">>> PAPER FIGURES (pgfplots) -> $EXPORT"
   run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL"
-  echo "   done. \\input plots/export/fig/*.tex ; menu: $EXPORT/all_figures.tex"
-  echo "   (Overleaf: see $EXPORT/README_OVERLEAF.md and preamble_snippet.tex)"
+  echo ">>> PAPER FIGURES (matplotlib) -> $FIGS"
+  run "$MP --res '$ALL' --out '$FIGS' --tail $TAIL"
+  echo "   pgfplots menu: $EXPORT/all_figures.tex  (Overleaf: $EXPORT/README_OVERLEAF.md)"
+  echo "   matplotlib PNG/PDF: $FIGS"
 }
 
 # appendix set (non-IID / other datasets / overlaps / savings). Off by default.

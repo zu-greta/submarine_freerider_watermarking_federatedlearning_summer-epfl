@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 """to_pgfplots -- turn result.json runs into pgfplots-ready .dat tables + .tex figures
 =======================================================================================
-default:
-  fig1  timeline BER vs round, honest vs OUR free-rider (reduced + head2) -- one FareMark,
-        one FedIPR                                   -> fig1_faremark_timeline / fig1_fedipr_timeline
-  tab1  cost table (samples + GPU-time, honest vs FR) for FareMark & FedIPR   -> tab1_costs
-  fig2  BER vs round: gaussian vs previous-models vs OUR attack (FareMark)     -> fig2_attack_compare
+default (3 seeds, std shown):
+  fig1  timeline BER vs round, honest vs OUR free-rider (reduced + head2) -- FareMark,
+        FedIPR, sign  -> fig1_faremark_timeline / fig1_fedipr_timeline / fig1_sign_timeline
+  tab1  cost table (samples + GPU-time, honest vs FR) FareMark/FedIPR/sign     -> tab1_costs
+  fig2  BER vs round: gaussian vs previous-models vs OUR attack -- FareMark,
+        sign          -> fig2_attack_compare / fig2_sign_attack_compare
   fig3  FareMark class difficulty: per-class BER honest vs FR + entropy on side-> fig3_class_difficulty
   fig4  FedIPR-sign: final BER vs #watermarked layers (the fix vs our attack)  -> fig4_layers
 
@@ -20,16 +21,12 @@ Usage
   python scripts/to_pgfplots.py --res '/mnt/nfs/home/zu/results/*/result.json' --out export --tail 20
   python scripts/to_pgfplots.py --res '...'  --out export --appendix          # appendix set
   python scripts/to_pgfplots.py --res '...'  --out export --only fig4_layers   # one figure
-
 """
 import argparse, glob, json, os, statistics as st
 from collections import defaultdict
 
-# TODO add the fedipr white box runs
-
 # ============================================================================
-# PAPER FIGURES  (default) -- 3 seeds, std shown 
-# - TODO change captions when they have been decided
+# PAPER FIGURES  (the only ones emitted by default) -- 3 seeds, std shown
 # ============================================================================
 FIGURES = [
     # ---- fig1: honest vs OUR free-rider (reduced data + head2), timeline, cifar-100 ----
@@ -44,11 +41,18 @@ FIGURES = [
          caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
                  "vs.\\ round for honest clients and our head-only free-rider. Same outcome as "
                  "FareMark: the free-rider evades. Bands are $\\pm 1$ s.d."),
+    dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR white-box sign (CIFAR-100, 3 seeds, 1 output layer): watermark BER "
+                 "(=Hamming$/N$) vs.\\ round for honest clients and our head2 free-rider. The "
+                 "free-rider re-embeds the single-layer sign mark and evades, same as the "
+                 "black-box schemes. Bands are $\\pm 1$ s.d."),
 
-    # ---- tab1: cost of honest vs OUR free-rider, both schemes ----
+    # ---- tab1: cost of honest vs OUR free-rider, all three schemes ----
     dict(name="tab1_costs", kind="costtable",
          rows=[("FareMark", "L1_graftblock_head2_c36"),
-               ("FedIPR",   "F_L1_graftblock_head2_c36_fi")],
+               ("FedIPR",   "F_L1_graftblock_head2_c36_fi"),
+               ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")],
          caption="Per-client training cost of an honest client vs.\\ our free-rider "
                  "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over 3 seeds. "
                  "Samples are device-independent; GPU-time is wall-time on the shared pool "
@@ -65,6 +69,15 @@ FIGURES = [
                  "baseline attacks (previous-models, Gaussian) and ours. The baselines sit "
                  "near chance (caught); ours stays in the honest band (evades). "
                  "Bands are $\\pm 1$ s.d."),
+    dict(name="fig2_sign_attack_compare", kind="attackcompare", honest="G_A1_honest_c100_ws",
+         attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
+                  ("gaussian",        "G_H6_gaussian_c100_ws"),
+                  ("ours (head2)",    "G_L1_graftblock_head2_c36_ws")],
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR white-box sign (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the "
+                 "two baseline attacks (previous-models, Gaussian) and ours. The baselines climb "
+                 "to chance ($0.5$, caught); ours stays at the honest floor (evades). "
+                 "Bands are $\\pm 1$ s.d."),
 
     # ---- fig3: FareMark class difficulty -- TWO plots: (a) BER bars, (b) entropy ----
     dict(name="fig3a_class_ber", kind="classbars",
@@ -72,10 +85,11 @@ FIGURES = [
          caption="FareMark (CIFAR-100, 3 seeds): per trigger-class watermark BER for honest "
                  "clients vs.\\ our free-rider. Harder classes have a higher honest floor; the "
                  "free-rider sits at or below it. Bars are mean $\\pm 1$ s.d.\\ over seeds."),
-    dict(name="fig3b_class_entropy", kind="classentropy", honest="A1_honest_c100",
-         caption="FareMark (CIFAR-100, 3 seeds): mean softmax entropy on each trigger class. "
-                 "Lower-entropy (peaked) classes are the harder-to-embed ones -- the same "
-                 "classes with the higher BER floor in Fig.~\\ref{fig:fig3a_class_ber}."),
+    dict(name="fig3b_class_entropy", kind="classscatter", honest="A1_honest_c100",
+         caption="FareMark (CIFAR-100, 3 seeds): watermark BER floor ($\\Delta$BER, mean over "
+                 "seeds) vs.\\ softmax entropy on the trigger class, one labelled point per class. "
+                 "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor "
+                 "-- the classes the free-rider hides behind in Fig.~\\ref{fig:fig3a_class_ber}."),
 
     # ---- fig4: FedIPR-sign final BER vs #watermarked layers (the fix) ----
     dict(name="fig4_layers", kind="layers",
@@ -90,7 +104,7 @@ FIGURES = [
 ]
 
 # ============================================================================
-# APPENDIX FIGURES  (emitted only with --appendix)  -- TBD, placeholders for now
+# APPENDIX FIGURES  (emitted only with --appendix)  -- TBD
 #   non-IID (E/EA), other datasets (food101), other models, band/overlap/savings, etc.
 # ============================================================================
 APPENDIX_FIGURES = [
@@ -175,6 +189,42 @@ def per_class_fr(runs, tail):
             for p in (h.get("wm_per_client") or []):
                 if p["cid"] in frs and p.get("ber") is not None:
                     out[int(p["trigger_class"])].append(float(p["ber"]))
+    return out
+
+def per_class_honest_by_seed(runs, tail):
+    """Per trigger-class, per-SEED tail-mean of ber/entrop"""
+    out = defaultdict(lambda: defaultdict(list))
+    for r in runs:                                   # r = one seed/rep
+        frs = set(r.get("free_rider_indices") or [])
+        acc = defaultdict(lambda: defaultdict(list))
+        for h in _hist(r, tail):
+            for p in (h.get("wm_per_client") or []):
+                if p["cid"] in frs:
+                    continue
+                c = int(p["trigger_class"])
+                for k in ("ber", "entropy"):
+                    v = p.get(k)
+                    if v is not None:
+                        acc[c][k].append(float(v))
+        for c, d in acc.items():
+            for k, vs in d.items():
+                if vs:
+                    out[c][k].append(st.mean(vs))    # this seed's tail-mean
+    return out
+
+def per_class_fr_by_seed(runs, tail):
+    """Per trigger-class, per-SEED tail-mean BER of the FREE-RIDER clients."""
+    out = defaultdict(list)
+    for r in runs:                                   # r = one seed/rep
+        frs = set(r.get("free_rider_indices") or [])
+        acc = defaultdict(list)
+        for h in _hist(r, tail):
+            for p in (h.get("wm_per_client") or []):
+                if p["cid"] in frs and p.get("ber") is not None:
+                    acc[int(p["trigger_class"])].append(float(p["ber"]))
+        for c, vs in acc.items():
+            if vs:
+                out[c].append(st.mean(vs))           # this seed's tail-mean
     return out
 
 def per_class_test(runs):
@@ -358,21 +408,25 @@ def emit_attackcompare(fig, runs, out, tail):
     eta = ""
     if et is not None: eta += f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
     if el is not None: eta += f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
+    # legend INSIDE the axes (top strip, 2 cols) so it never overflows the column,
+    # matching the timelines/fig4. Data plateaus <= ~0.5 so the upper half is free.
     tex = (fig_open(fig, "xlabel={communication round},ylabel={watermark BER},ymin=0,ymax=1,"
-                    "legend pos=outer north east") + body + eta + fig_close(fig))
+                    "legend pos=north east,legend columns=2,"
+                    "legend style={/tikz/every even column/.append style={column sep=6pt}}")
+           + body + eta + fig_close(fig))
     return dat, tex
 
 def emit_classbars(fig, runs, out, tail):
     """fig3a: per-class honest BER bars (all classes) + FR BER bars (its trigger classes)."""
     hon = runs.get(fig["honest"]); fr = runs.get(fig["fr"])
     if not hon: return None
-    pch = per_class_honest(hon, tail)
-    pcf = per_class_fr(fr, tail) if fr else {}
+    pch = per_class_honest_by_seed(hon, tail)          # tail-mean per seed -> clean over-seeds std
+    pcf = per_class_fr_by_seed(fr, tail) if fr else {}
     hrows, frows = [], []
     for c in sorted(pch):
         hb = pch[c]["ber"]
         if not hb: continue
-        hm, hs = _ms(hb); hrows.append((c, hm, hs))
+        hm, hs = _ms(hb); hrows.append((c, hm, hs))    # mean +/- s.d. OVER SEEDS
         fb = pcf.get(c, [])
         if fb:                                  # FR only occupies its trigger class(es)
             fm, fs = _ms(fb); frows.append((c, fm, fs))
@@ -391,24 +445,34 @@ def emit_classbars(fig, runs, out, tail):
            f"{fr_plot}" + fig_close(fig))
     return dat, tex
 
-def emit_classentropy(fig, runs, out, tail):
-    """fig3b: per-class mean softmax entropy (bars), +-1 s.d. over the pooled rounds/seeds."""
+def emit_classscatter(fig, runs, out, tail):
+    """fig3b: SCATTER (points, not bars) -- honest watermark BER floor (y) vs softmax
+    entropy (x), ONE point per trigger class, mean +/- 1 s.d. over the 3 seeds on both axes"""
     hon = runs.get(fig["honest"])
     if not hon: return None
-    pch = per_class_honest(hon, tail)
+    pcs = per_class_honest_by_seed(hon, tail)          # per-seed tail-means -> clean std
     rows = []
-    for c in sorted(pch):
-        en = pch[c]["entropy"]
-        if not en: continue
-        em, es = _ms(en); rows.append((c, em, es))
+    for c in sorted(pcs):
+        en, be = pcs[c].get("entropy", []), pcs[c].get("ber", [])
+        if not en or not be: continue
+        em, es = _ms(en); bm, bs = _ms(be)
+        rows.append((c, em, es, bm, bs))
     if not rows: return None
     dat = f"{fig['name']}.dat"
-    write_dat(os.path.join(out, "data", dat), ["class","entropy","entropy_sd"], rows)
-    tex = (fig_open(fig, "ybar,bar width=6pt,xlabel={trigger class},ylabel={softmax entropy},"
-                    "xtick=data,ymin=0,enlarge x limits=0.08") +
-           f"\\addplot[cacc,fill=cacc!55,draw=cacc,error bars/.cd,y dir=both,y explicit] "
-           f"table[x=class,y=entropy,y error=entropy_sd]{{{dat}}};\n" +
-           fig_close(fig))
+    write_dat(os.path.join(out, "data", dat),
+              ["class","entropy","entropy_sd","ber","ber_sd"], rows)
+    # class-number label to the upper-right of each dot (so a point traces back to fig3a).
+    labels = "".join(
+        f"\\node[font=\\scriptsize,anchor=west,inner sep=2pt] "
+        f"at (axis cs:{e:.5f},{b:.5f}) {{{c}}};\n" for (c, e, es, b, bs) in rows)
+    # CLEAN scatter (no error bars) + taller box + gridlines -> spread out, matches the
+    # matplotlib "before" look. Override AXBASE height (last key wins) so points breathe.
+    tex = (fig_open(fig, "height=6cm,xlabel={softmax entropy on trigger class},"
+                    "ylabel={$\\Delta$ BER},ymin=0,ymajorgrids=true,"
+                    "grid style={gray!25},enlarge x limits=0.16,enlarge y limits=0.14") +
+           f"\\addplot[only marks,cfr,mark=*,mark size=2pt] "
+           f"table[x=entropy,y=ber]{{{dat}}};\n"
+           f"{labels}" + fig_close(fig))
     return dat, tex
 
 def emit_layers(fig, runs, out, tail):
@@ -536,7 +600,7 @@ def emit_savings(fig, runs, out, tail):
 
 EMIT = {"timeline": emit_timeline, "costtable": emit_costtable,
         "attackcompare": emit_attackcompare, "classbars": emit_classbars,
-        "classentropy": emit_classentropy, "layers": emit_layers,
+        "classscatter": emit_classscatter, "layers": emit_layers,
         "band": emit_band, "overlap": emit_overlap, "savings": emit_savings}
 
 def main():
@@ -574,7 +638,7 @@ def main():
     kind = "appendix" if a.appendix else "paper"
     print(f"\n{len(made)} {kind} figures -> {a.out}/  (menu: {a.out}/{menu})")
 
-PREAMBLE = r"""% --- paste into your main.tex preamble ---
+PREAMBLE = r"""% --- paste into your main.tex preamble (once) ---
 \usepackage{pgfplots}
 \usepgfplotslibrary{fillbetween}     % for the +-std / honest bands
 \usepackage{multirow}                % for the cost table (tab1)
@@ -589,9 +653,9 @@ PREAMBLE = r"""% --- paste into your main.tex preamble ---
 README = r"""# Overleaf: paper figures + table (vector pgfplots, matplotlib-matched)
 
 `.dat` = raw numbers, `.tex` = the pgfplots/tabular that draws them. Paper set:
-  fig1_faremark_timeline, fig1_fedipr_timeline   (fig 1)
-  tab1_costs                                      (table 1)
-  fig2_attack_compare                             (fig 2)
+  fig1_faremark_timeline, fig1_fedipr_timeline, fig1_sign_timeline   (fig 1)
+  tab1_costs                                      (table 1: FareMark/FedIPR/sign)
+  fig2_attack_compare, fig2_sign_attack_compare   (fig 2)
   fig3a_class_ber, fig3b_class_entropy            (fig 3, two panels)
   fig4_layers                                     (fig 4)
 Appendix set (regenerate with `--appendix`): app_* figures.
