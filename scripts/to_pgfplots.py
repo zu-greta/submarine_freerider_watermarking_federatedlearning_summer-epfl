@@ -54,10 +54,11 @@ FIGURES = [
                ("FedIPR",   "F_L1_graftblock_head2_c36_fi"),
                ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")],
          caption="Per-client training cost of an honest client vs.\\ our free-rider "
-                 "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over 3 seeds. "
-                 "Samples are device-independent; GPU-time is wall-time on the shared pool "
-                 "(absolute values indicative, the honest/FR \\emph{ratio} is the reliable "
-                 "quantity)."),
+                 "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over seeds. Samples are "
+                 "device-independent; GPU cost is the within-run free-rider/honest GPU-time "
+                 "ratio (honest and free-rider are timed in the same run under identical GPU "
+                 "load, so the ratio is unaffected by how many jobs shared the pool). "
+                 "Both columns show the free-rider needs $\\approx\\!0.3\\times$ an honest client."),
 
     # ---- fig2: attack comparison (gaussian / previous-models / ours), FareMark ----
     dict(name="fig2_attack_compare", kind="attackcompare", honest="A1_honest_c100",
@@ -319,30 +320,33 @@ def emit_costtable(fig, runs, out, tail):
             continue
         any_ok = True
         hs_m, hs_s = col("honest_mean_samples"); fs_m, fs_s = col("fr_mean_samples")
-        hg_m, hg_s = col("honest_mean_gpu_ms");  fg_m, fg_s = col("fr_mean_gpu_ms")
+        # GPU cost as the WITHIN-RUN free-rider/honest ratio (effort_ratio_gpu), averaged
+        # over seeds. honest & FR are timed in the same run under the same GPU contention,
+        # so this ratio is concurrency-robust -- unlike absolute gpu_ms, it does NOT depend
+        # on how many jobs shared the GPU. (samples ratio is contention-free by construction.)
+        gr_m, gr_s = col("effort_ratio_gpu")
         ratio_s = (fs_m / hs_m) if hs_m else float("nan")
-        rows.append((label, n, hs_m, hs_s, fs_m, fs_s, hg_m/1e3, hg_s/1e3, fg_m/1e3, fg_s/1e3,
-                     ratio_s))
+        rows.append((label, n, hs_m, hs_s, fs_m, fs_s, gr_m, gr_s, ratio_s))
     if not any_ok:
         return None
     dat = f"{fig['name']}.dat"
     write_dat(os.path.join(out, "data", dat),
               ["scheme","seeds","hon_samp","hon_samp_sd","fr_samp","fr_samp_sd",
-               "hon_gpu_s","hon_gpu_s_sd","fr_gpu_s","fr_gpu_s_sd","ratio_samp"], rows)
+               "gpu_ratio","gpu_ratio_sd","ratio_samp"], rows)
     def pm(m, s, dp=0):
         if m != m: return "--"
         return f"${m:,.{dp}f} \\pm {s:,.{dp}f}$"
     body = ""
-    for (label, n, hs_m, hs_s, fs_m, fs_s, hg_m, hg_s, fg_m, fg_s, rs) in rows:
-        body += (f"\\multirow{{2}}{{*}}{{{label}}} & honest & {pm(hs_m,hs_s)} & {pm(hg_m,hg_s,1)} & $1.00$ \\\\\n"
-                 f" & FR (ours) & {pm(fs_m,fs_s)} & {pm(fg_m,fg_s,1)} & ${rs:.3f}$ \\\\\n"
+    for (label, n, hs_m, hs_s, fs_m, fs_s, gr_m, gr_s, rs) in rows:
+        body += (f"\\multirow{{2}}{{*}}{{{label}}} & honest & {pm(hs_m,hs_s)} & $1.00$ & $1.00$ \\\\\n"
+                 f" & FR (ours) & {pm(fs_m,fs_s)} & {pm(gr_m,gr_s,3)} & ${rs:.3f}$ \\\\\n"
                  f"\\midrule\n")
     if body.endswith("\\midrule\n"):
         body = body[:-len("\\midrule\n")]
     tex = (f"\\begin{{table}}[t]\\centering\n"
            f"\\caption{{{fig['caption']}}}\\label{{tab:{fig['name']}}}\n"
            f"\\begin{{tabular}}{{llrrr}}\n\\toprule\n"
-           f"Scheme & Client & Samples (run) & GPU-time (s) & Cost / honest \\\\\n\\midrule\n"
+           f"Scheme & Client & Samples (run) & GPU (\\(\\times\\) honest) & Cost / honest \\\\\n\\midrule\n"
            f"{body}"
            f"\\bottomrule\n\\end{{tabular}}\n\\end{{table}}\n")
     return dat, tex

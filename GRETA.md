@@ -708,6 +708,11 @@ have the plots for next week
 fedipr with more layers
 food-100
 
+September 9
+- food-101
+- gather realted papers
+
+
 ---
 
 -> paper notes

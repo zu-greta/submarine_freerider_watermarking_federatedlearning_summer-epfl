@@ -379,9 +379,7 @@ runbook.sh -- run phases
     RES=~/local/results ./runbook.sh appendix 4b. appendix figure set (pgfplots)
     (plot-legacy = the old full matplotlib PNG suite, dormant)
 
-  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G .
-     (F = FedIPR backdoor, 2nd output-layer scheme; G = FedIPR SIGN white-box, 3rd
-      scheme, mark forced into the output layer: BATCH=G ./runbook.sh manifest)
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD .
 USAGE
     ;;
 esac

@@ -181,8 +181,8 @@ CONFIGS = [
               attack="adaptive_tap", num_free_riders=2,
               expected_acc=(0.0, 100.0)),
 
-    # 15: Food-101 attack base (== config 14 but dataset=food101, 101 classes)
-    ExpConfig("attack_base_resnet18_food101", "resnet18", "food101",
+    # 15: Food-101 attack base (== config 14 but dataset=food101, 101 classes). resnet-50
+    ExpConfig("attack_base_resnet50_food101", "resnet50", "food101",
               num_clients=10, watermark=True, wm_lambda=5.0, wm_beta=0.6,
               attack="adaptive_tap", num_free_riders=2,
               expected_acc=(0.0, 100.0)),
@@ -199,7 +199,14 @@ def get_config(idx: int) -> ExpConfig:
         raise IndexError(
             f"config_idx {idx} out of range (have {len(CONFIGS)}): "
             + ", ".join(f"{i}:{c.name}" for i, c in enumerate(CONFIGS)))
-    return CONFIGS[idx]
+    cfg = CONFIGS[idx]
+    # env MODEL=resnet18|resnet34|resnet50 overrides the backbone 
+    import os
+    from dataclasses import replace
+    m = os.environ.get("MODEL", "").strip()
+    if m:
+        cfg = replace(cfg, model=m)
+    return cfg
 
 
 def seed_for(cfg: ExpConfig, repeat: int) -> int:

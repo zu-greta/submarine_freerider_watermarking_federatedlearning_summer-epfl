@@ -526,6 +526,50 @@ if has G; then
   done
 fi
 
+# ---------------------------------------------------------------------------
+# GROUP FD -- Food-101 basics (1 seed) on ResNet-50 (config 15 = resnet50).
+# ---------------------------------------------------------------------------
+if has FD; then
+  echo " Group FD -- Food-101 basics (1 seed, config 15 / resnet50)"
+  CIDX=15
+  SEED_FD="${SEED_FD:-0}"
+  gb="PARTITION=iid ROUNDS=50 FAST_DATA=1 AUTOP_COMMON_PER_CLASS=5 \
+      AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 FREE_RIDER_IDS=3,6 \
+      TAP_SCOPE=head2 TAP_COAST_MODE=decay"
+
+  # ---- FareMark (box-free) ----
+  env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+      FAMILY="A1_honest_c100" NOTE="FD FareMark honest (food101/resnet50)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  env ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=0.064 ROUNDS=50 \
+      FAMILY="H5_prevmodel_c100" NOTE="FD FareMark prev-models control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # env ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=0.064 ROUNDS=50 \
+  #     FAMILY="H6_gaussian_c100" NOTE="FD FareMark gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  env ATTACK=graftblock $gb WM_ETA_FIXED=0.064 \
+      FAMILY="L1_graftblock_head2_c36" NOTE="FD FareMark graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+
+  # ---- FedIPR backdoor ----  (noise triggers = self-contained, no SVHN download on the pod)
+  # FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-noise} FEDIPR_NUM_TRIGGER=40 FEDIPR_TARGET_MODE=cid"
+  # env $FI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+  #     FAMILY="F_A1_honest_c100_fi" NOTE="FD FedIPR honest (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # env $FI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=0.20 ROUNDS=50 \
+  #     FAMILY="F_H5_prevmodel_c100_fi" NOTE="FD FedIPR prev-models control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # env $FI ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=0.20 ROUNDS=50 \
+  #     FAMILY="F_H6_gaussian_c100_fi" NOTE="FD FedIPR gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # env $FI ATTACK=graftblock $gb WM_ETA_FIXED=0.20 \
+  #     FAMILY="F_L1_graftblock_head2_c36_fi" NOTE="FD FedIPR graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+
+  # ---- FedIPR SIGN (white-box) ----  carrier auto_last_bn = the last BN scale (works on resnet50)
+  GI="WM_SCHEME=fedipr_sign FEDIPR_SIGN_BITS=40 FEDIPR_SIGN_MARGIN=0.1 FEDIPR_SIGN_LAMBDA=1.0 FEDIPR_SIGN_CARRIER=auto_last_bn"
+  env $GI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+      FAMILY="G_A1_honest_c100_ws" NOTE="FD sign honest (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  env $GI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=0.20 ROUNDS=50 \
+      FAMILY="G_H5_prevmodel_c100_ws" NOTE="FD sign prev-models control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # env $GI ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=0.20 ROUNDS=50 \
+  #     FAMILY="G_H6_gaussian_c100_ws" NOTE="FD sign gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  env $GI ATTACK=graftblock $gb WM_ETA_FIXED=0.20 \
+      FAMILY="G_L1_graftblock_head2_c36_ws" NOTE="FD sign graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+fi
+
 N=$(grep -c . "$JOBS_FILE" 2>/dev/null || echo 0)
 echo
 echo "== $N runs queued  (groups: $WANT) =="
