@@ -15,7 +15,7 @@
 #   EA non-IID distribution-aware assignment (EA1 honest, EA2 reduced)
 #   H  baseline free-riders: H5 previous-models + H6 gaussian-noise
 #   K  the submarine: K4 (block2 scope) + K9 (head2 scope) - 1,7 and 3,6 (appendix)
-#   L  graftblock free-rider (head2 scope) - 1,7 and 3,6 - (our attack)
+#   L  graftblock free-rider (head scope: softmax fc only) - 1,7 and 3,6 - (our attack)
 #   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
 #   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6) (appendix)
 # FedIPR:
@@ -351,28 +351,29 @@ fi
 if has L; then
   # ---------------------------------------------------------------------------
   # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock") - OUR ATTACK
-  #   Warm up honest, then free-ride train only the last layers on a reduced shard (cpc=5)
-  #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
+  #   Warm up honest, then free-ride train only the last layer on a reduced shard (cpc=5)
+  #     head   = the softmax fc alone (last 2 tensors, 51.3k scalars on CIFAR-100)
+  #     head2  = softmax fc + the conv layer just before it   (last 5 tensors, 2.41M)
   # ---------------------------------------------------------------------------
   SEEDS_L="${SEEDS_L:-0 1 2}"                        
   lbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
          AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
          WM_ETA_FIXED=0.064 FREE_RIDER_IDS=3,6"
   for s in $SEEDS_L; do
-    # L1 -- head2 scope (softmax + previous layer)
-    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=decay \
-        FAMILY="L1_graftblock_head2_c36" \
-        NOTE="L1 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 3,6)" \
+    # L1 -- head scope (softmax fc only, ~51k params on CIFAR-100 with ResNet-18)
+    env $lbase TAP_SCOPE=head  TAP_COAST_MODE=decay \
+        FAMILY="L1_graftblock_head_c36" \
+        NOTE="L1 graftblock reduced cpc5 + head (softmax fc only, 51.3k) no graft (classes 3,6)" \
         ./submit_experiment.sh 14 "$s"
     # L2 -- block2 (20 tensors) scope, no graft
     # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=decay \
     #     FAMILY="L2_graftblock_block2_c36" \
     #     NOTE="L2 graftblock reduced cpc5 + block2 no graft (classes 3,6)" \
     #     ./submit_experiment.sh 14 "$s"
-    # L3 -- head2 scope + graft trained scope onto global each round
-    # env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=graft \
-    #     FAMILY="L3_graftblock_head2_graft_c36" \
-    #     NOTE="L3 graftblock reduced cpc5 + head2 + graft onto global each round (classes 3,6)" \
+    # L3 -- head scope + graft trained scope onto global each round
+    # env $lbase TAP_SCOPE=head  TAP_COAST_MODE=graft \
+    #     FAMILY="L3_graftblock_head_graft_c36" \
+    #     NOTE="L3 graftblock reduced cpc5 + head + graft onto global each round (classes 3,6)" \
     #     ./submit_experiment.sh 14 "$s"
     # L4 -- block2 (20 tensors) scope + graft trained scope onto global each round
     # env $lbase TAP_SCOPE=block2 TAP_COAST_MODE=graft \
@@ -380,10 +381,10 @@ if has L; then
     #     NOTE="L4 graftblock reduced cpc5 + block2 + graft onto global each round (classes 3,6)" \
     #     ./submit_experiment.sh 14 "$s"
     # L5 -- L1 but on the easy classes 1,7
-    env $lbase TAP_SCOPE=head2  TAP_COAST_MODE=decay \
+    env $lbase TAP_SCOPE=head  TAP_COAST_MODE=decay \
         FREE_RIDER_IDS=1,7 \
-        FAMILY="L5_graftblock_head2_c17" \
-        NOTE="L5 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 1,7)" \
+        FAMILY="L5_graftblock_head_c17" \
+        NOTE="L5 graftblock reduced cpc5 + head (softmax fc only, 51.3k) no graft (classes 1,7)" \
         ./submit_experiment.sh 14 "$s"
   done
 fi
@@ -544,8 +545,9 @@ if has FD; then
       FAMILY="H5_prevmodel_c100" NOTE="FD FareMark prev-models control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
   # env ATTACK=gaussian NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 NOISE_SIGMA=0.1 WM_ETA_FIXED=0.064 ROUNDS=50 \
   #     FAMILY="H6_gaussian_c100" NOTE="FD FareMark gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
-  env ATTACK=graftblock $gb WM_ETA_FIXED=0.064 \
-      FAMILY="L1_graftblock_head2_c36" NOTE="FD FareMark graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # TAP_SCOPE=head after $gb overrides its head2 (env: last assignment wins) -> fc only
+  env ATTACK=graftblock $gb TAP_SCOPE=head WM_ETA_FIXED=0.064 \
+      FAMILY="L1_graftblock_head_c36" NOTE="FD FareMark graftblock head (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
 
   # ---- FedIPR backdoor ----  (noise triggers = self-contained, no SVHN download on the pod)
   # FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-noise} FEDIPR_NUM_TRIGGER=40 FEDIPR_TARGET_MODE=cid"

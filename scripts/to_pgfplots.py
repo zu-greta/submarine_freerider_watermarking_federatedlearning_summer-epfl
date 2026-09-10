@@ -29,8 +29,8 @@ from collections import defaultdict
 # PAPER FIGURES  (the only ones emitted by default) -- 3 seeds, std shown
 # ============================================================================
 FIGURES = [
-    # ---- fig1: honest vs OUR free-rider (reduced data + head2), timeline, cifar-100 ----
-    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head2_c36",
+    # ---- fig1: honest vs OUR free-rider (reduced data + head), timeline, cifar-100 ----
+    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head_c36",
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100, 3 seeds): watermark BER vs.\\ communication round for "
                  "honest clients and our reduced-data head-only free-rider. The free-rider "
@@ -50,7 +50,7 @@ FIGURES = [
 
     # ---- tab1: cost of honest vs OUR free-rider, all three schemes ----
     dict(name="tab1_costs", kind="costtable",
-         rows=[("FareMark", "L1_graftblock_head2_c36"),
+         rows=[("FareMark", "L1_graftblock_head_c36"),
                ("FedIPR",   "F_L1_graftblock_head2_c36_fi"),
                ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")],
          caption="Per-client training cost of an honest client vs.\\ our free-rider "
@@ -64,7 +64,7 @@ FIGURES = [
     dict(name="fig2_attack_compare", kind="attackcompare", honest="A1_honest_c100",
          attacks=[("previous models", "H5_prevmodel_c100"),
                   ("gaussian",        "H6_gaussian_c100"),
-                  ("ours (head2)",    "L1_graftblock_head2_c36")],
+                  ("ours (head)",     "L1_graftblock_head_c36")],
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the two "
                  "baseline attacks (previous-models, Gaussian) and ours. The baselines sit "
@@ -82,7 +82,7 @@ FIGURES = [
 
     # ---- fig3: FareMark class difficulty -- TWO plots: (a) BER bars, (b) entropy ----
     dict(name="fig3a_class_ber", kind="classbars",
-         honest="A1_honest_c100", fr="L1_graftblock_head2_c36",
+         honest="A1_honest_c100", fr="L1_graftblock_head_c36",
          caption="FareMark (CIFAR-100, 3 seeds): per trigger-class watermark BER for honest "
                  "clients vs.\\ our free-rider. Harder classes have a higher honest floor; the "
                  "free-rider sits at or below it. Bars are mean $\\pm 1$ s.d.\\ over seeds."),
@@ -110,14 +110,14 @@ FIGURES = [
 # ============================================================================
 APPENDIX_FIGURES = [
     dict(name="app_faremark_overlap", kind="overlap", honest="A1_honest_c100",
-         fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
+         fr=["L1_graftblock_head_c36", "L5_graftblock_head_c17",
              "K9_alldyn_head2_c36", "K9_alldyn_head2_c17"], eta_t=0.064, eta_l=0.264,
          caption="Honest per-class BER band vs.\\ free-rider operating points (FareMark). "
                  "Free-riders land inside the band; no single threshold separates them."),
     dict(name="app_faremark_class_band", kind="band", family="A1_honest_c100",
          caption="Per-trigger-class honest watermark BER (FareMark, CIFAR-100)."),
     dict(name="app_faremark_savings", kind="savings",
-         fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
+         fr=["L1_graftblock_head_c36", "L5_graftblock_head_c17",
              "K9_alldyn_head2_c36", "K4_alldyn_block2_c36"],
          caption="Free-rider cost as a fraction of an honest client (samples and GPU-time)."),
     dict(name="app_fedipr_overlap", kind="overlap", honest="F_A1_honest_c100_fi",

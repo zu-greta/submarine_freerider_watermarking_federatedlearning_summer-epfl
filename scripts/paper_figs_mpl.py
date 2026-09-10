@@ -170,7 +170,8 @@ def fig_attack(spec, runs, out, tail):
     if rounds:
         bm = [_ms(benR[rd]) for rd in rounds]
         _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
-    style = {"previous models": (C_PREV, "s"), "gaussian": (C_ACC, "^"), "ours (head2)": (C_FR, "o")}
+    style = {"previous models": (C_PREV, "s"), "gaussian": (C_ACC, "^"), "ours (head2)": (C_FR, "o"),
+             "ours (head)": (C_FR, "o")}
     for lbl, fam in present:
         fR = per_round(runs.get(fam), "wm_fr_ber")
         rr = sorted(fR)
@@ -307,26 +308,26 @@ def tab_costs(spec, runs, out, tail):
 # figure registry -- families kept in lock-step with to_pgfplots.py
 # ============================================================================
 FIGS = [
-    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head2_c36",
+    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head_c36",
          eta_t=0.064, eta_l=0.264, title="FareMark: honest vs free-rider"),
     dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
          eta_t=0.20, eta_l=0.50, title="FedIPR backdoor: honest vs free-rider"),
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
          eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (L=1): honest vs free-rider"),
     dict(name="tab1_costs", kind="costtable",
-         rows=[("FareMark", "L1_graftblock_head2_c36"),
+         rows=[("FareMark", "L1_graftblock_head_c36"),
                ("FedIPR", "F_L1_graftblock_head2_c36_fi"),
                ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")]),
     dict(name="fig2_attack_compare", kind="attack", honest="A1_honest_c100",
          attacks=[("previous models", "H5_prevmodel_c100"), ("gaussian", "H6_gaussian_c100"),
-                  ("ours (head2)", "L1_graftblock_head2_c36")],
+                  ("ours (head)", "L1_graftblock_head_c36")],
          eta_t=0.064, eta_l=0.264, title="FareMark: attack comparison"),
     dict(name="fig2_sign_attack_compare", kind="attack", honest="G_A1_honest_c100_ws",
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"), ("gaussian", "G_H6_gaussian_c100_ws"),
                   ("ours (head2)", "G_L1_graftblock_head2_c36_ws")],
          eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign: attack comparison"),
     dict(name="fig3_class_difficulty", kind="classdiff",
-         honest="A1_honest_c100", fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17"]),
+         honest="A1_honest_c100", fr=["L1_graftblock_head_c36", "L5_graftblock_head_c17"]),
     dict(name="fig4_layers", kind="layers",
          honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
          layers=[1, 2, 4], eta_t=0.20, eta_l=0.50, title="White-box: more layers beats the free-rider"),

@@ -48,7 +48,9 @@ class ExpConfig:
     tap_period: int = 1              # period P for tap_when="every_k"
     tap_max_coast: int = 999         # force a tap after this many consecutive coasts (safety cap)
     tap_data_cpc: int = 5            # amount of data per tap: images/common-class (-1 full shard, 0 trigger-only, N=+N)
-    tap_scope: str = "full"          # model scope a tap trains: "full" | "block2" (last 20 tensors) 
+    tap_scope: str = ""              # model scope a tap trains; "" = the attack's own default
+                                     # (adaptive_tap -> "full", graftblock -> "head" = fc only).
+                                     # explicit: "full" | "block2" (last 20 tensors) | "head2" | "head"
     tap_coast_mode: str = "decay"    # how the FR free-rides between taps: "decay" = resend its own last tapped
     tap_graft_decay: float = 0.0     # graft coast: blend frozen mark-head toward global head each coast (0=off, tail-spike fix)
     tap_probe_holdout: int = 16      # held-out trigger images for the FR's self-BER probe (generalisation)

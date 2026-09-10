@@ -592,7 +592,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     period=getattr(cfg, "tap_period", 1),
                     max_coast=getattr(cfg, "tap_max_coast", 999),
                     data_cpc=getattr(cfg, "tap_data_cpc", 5),
-                    scope=getattr(cfg, "tap_scope", "full"),
+                    scope=(getattr(cfg, "tap_scope", "full") or "full"),
                     coast_mode=getattr(cfg, "tap_coast_mode", "graft"),
                     graft_decay=getattr(cfg, "tap_graft_decay", 0.0),
                     probe_holdout=getattr(cfg, "tap_probe_holdout", 16),
@@ -613,7 +613,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     common_per_class=int(getattr(cfg, "autop_common_per_class", 5)),
                     honest_rounds=getattr(cfg, "autop_honest_until", 12),
                     calib_rounds=getattr(cfg, "autop_calib_rounds", 4),
-                    scope=(getattr(cfg, "tap_scope", "head2") or "head2"),
+                    scope=(getattr(cfg, "tap_scope", "head") or "head"),
                     graft=(str(getattr(cfg, "tap_coast_mode", "")) == "graft"),
                     n_common_classes=int(getattr(cfg, "autop_n_common_classes", -1)),
                     trigger_train_n=int(getattr(cfg, "autop_trigger_train_n", -1)),
@@ -1329,7 +1329,8 @@ def make_adaptive_tap_attack(base_cls):
 #  Final layers Attack (group L):  -- our attack                       
 #  honest warmup, then every free-ride round: train only the last layers on a
 #  reduced shard (cpc)
-#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it)
+#    scope  <- tap_scope   ("head" = the softmax fc alone, the default;
+#                           "head2" = fc + the conv layer before it)
 #    cpc    <- autop_common_per_class ; warmup <- autop_honest_until/_calib_rounds
 # ------------------------------------------------------------------------------ #
 def make_graftblock_attack(base_cls):
@@ -1339,14 +1340,16 @@ def make_graftblock_attack(base_cls):
         attack_name = "graftblock"
         # ---- SCOPE = trailing parameter tensors stay trainable ----
         # ResNet-18: 62 named parameter tensors. freeze earlier layers at global model
+        #   "head"   keep = 2  -> [fc.weight, fc.bias] only == the SOFTMAX/OUTPUT layer.
+        #            CIFAR-100: 512*100 + 100 = 51.3k scalars (~0.46%).  DEFAULT.
         #   "head2"  keep = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
         #                          fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
-        #            = the SOFTMAX/OUTPUT layer (fc) + the conv layer right before
+        #            = the output layer + the conv layer right before it.
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
         # note: other scopes dropped
 
         def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,
-                     calib_rounds: int = 4, scope: str = "head2", graft: bool = False,
+                     calib_rounds: int = 4, scope: str = "head", graft: bool = False,
                      n_common_classes: int = -1, trigger_train_n: int = -1, **kw):
             super().__init__(*a, **kw)
             self.common_per_class = int(common_per_class)
