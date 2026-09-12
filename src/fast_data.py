@@ -2,6 +2,8 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import torch
 
@@ -11,6 +13,9 @@ _NORM = {
     "cifar100": ((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)),
     "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 }
+
+FOOD_SIZE = int(os.environ.get("FOOD_SIZE", "64"))
+FOOD_PAD = int(os.environ.get("FOOD_FAST_PAD", "8"))
 
 
 class GPUImageStore:
@@ -31,26 +36,33 @@ class GPUImageStore:
         self._fill = (-self.mean / self.std).view(1, c, 1, 1)
 
     @classmethod
-    def from_torchvision(cls, ds, name: str, device, pad: int = 4):
-        """Pull the raw uint8 array straight out of a torchvision dataset
-        """
+    def from_torchvision(cls, ds, name: str, device, pad: int = 4, train: bool = True):
+        """Pull the raw uint8 array out of a torchvision dataset, or decode every image
+        once into a uint8 tensor and cache it to disk for later runs."""
         name = name.lower()
         mean, std = _NORM[name]
 
         raw = getattr(ds, "data", None)
-        if raw is None:
-            raise TypeError(f"{type(ds).__name__} has no .data; cannot build a GPU store")
+        if raw is not None:                                   # CIFAR / MNIST fast path
+            arr = np.asarray(raw)
+            if arr.ndim == 3:                                 # MNIST: [N,H,W]
+                arr = arr[:, None, :, :]
+            else:                                             # CIFAR: [N,H,W,C]->[N,C,H,W]
+                arr = arr.transpose(0, 3, 1, 2)
+            images = torch.from_numpy(np.ascontiguousarray(arr))
+            labels = torch.as_tensor(np.asarray(_labels_of(ds)), dtype=torch.long)
+        elif name == "food101":                               # decode JPEGs once, then cache
+            images, labels = _food_arrays(ds, "train" if train else "test", FOOD_SIZE)
+        else:
+            raise TypeError(f"{type(ds).__name__} has no .data and no decoder for '{name}'")
 
-        arr = np.asarray(raw)
-        if arr.ndim == 3:                      # MNIST: [N,H,W]
-            arr = arr[:, None, :, :]
-        else:                                  # CIFAR: [N,H,W,C] -> [N,C,H,W]
-            arr = arr.transpose(0, 3, 1, 2)
-
-        images = torch.from_numpy(np.ascontiguousarray(arr))
-        labels = torch.as_tensor(np.asarray(_labels_of(ds)), dtype=torch.long)
-        if name not in ("cifar10", "cifar100"):
-            pad = 0                            # only CIFAR gets crop augmentation
+        # Only the train store gets GPU-side crop+flip augmentation.
+        if train and name in ("cifar10", "cifar100"):
+            pad = pad if pad else 4
+        elif train and name == "food101":
+            pad = FOOD_PAD
+        else:
+            pad = 0
         return cls(images, labels, mean, std, pad, device)
 
     def __len__(self):
@@ -62,6 +74,60 @@ def _labels_of(ds):
         if hasattr(ds, attr):
             return getattr(ds, attr)
     raise TypeError("dataset exposes neither .targets nor .labels")
+
+
+# ---------------------------------------------------------------------------
+# Food-101: decode every JPEG once into a uint8 [N,C,S,S] tensor + disk cache
+# ---------------------------------------------------------------------------
+def _decode_food_to_uint8(ds, size):
+    from PIL import Image
+    files = getattr(ds, "_image_files", None)
+    labels = getattr(ds, "_labels", None)
+    if files is not None and labels is not None:
+        paths = [str(f) for f in files]
+        labs = [int(x) for x in labels]
+        arr = torch.empty((len(paths), 3, size, size), dtype=torch.uint8)
+        for i, p in enumerate(paths):
+            im = Image.open(p).convert("RGB").resize((size, size), Image.BILINEAR)
+            arr[i] = torch.from_numpy(np.array(im, dtype=np.uint8)).permute(2, 0, 1)
+            if i % 10000 == 0:
+                print(f"  [fast_data] decoding food101 {i}/{len(paths)} -> {size}px")
+        return arr, torch.as_tensor(labs, dtype=torch.long)
+    # version-agnostic fallback: read raw PIL with the transform disabled
+    tf = getattr(ds, "transform", None)
+    imgs, labs = [], []
+    try:
+        ds.transform = None
+        for i in range(len(ds)):
+            im, y = ds[i]
+            imgs.append(np.asarray(im.convert("RGB").resize((size, size), Image.BILINEAR),
+                                   dtype=np.uint8))
+            labs.append(int(y))
+    finally:
+        ds.transform = tf
+    arr = torch.from_numpy(np.stack(imgs)).permute(0, 3, 1, 2).contiguous()
+    return arr, torch.as_tensor(labs, dtype=torch.long)
+
+
+def _food_arrays(ds, split, size):
+    """Return (images_u8 [N,C,size,size], labels), decoding+caching on first use."""
+    base = getattr(ds, "_base_folder", None) or \
+        os.path.join(str(getattr(ds, "root", ".")), "food-101")
+    cache_dir = os.path.join(str(base), "cache")
+    cache = os.path.join(cache_dir, f"food101_{split}_{size}.pt")
+    if os.path.exists(cache):
+        blob = torch.load(cache, map_location="cpu")
+        print(f"  [fast_data] loaded food101 cache {cache} {tuple(blob['images'].shape)}")
+        return blob["images"], blob["labels"]
+    print(f"  [fast_data] decoding food101 '{split}' -> {size}px (one-time; caching)")
+    imgs, labs = _decode_food_to_uint8(ds, size)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        torch.save({"images": imgs, "labels": labs}, cache)
+        print(f"  [fast_data] cached food101 '{split}' -> {cache} {tuple(imgs.shape)}")
+    except Exception as e:
+        print(f"  [fast_data] cache write skipped ({type(e).__name__}: {e})")
+    return imgs, labs
 
 
 class _IndexView:
@@ -161,9 +227,9 @@ def wrap_build_data(data, name, batch_size, seed, device):
 
         cl0 = data.client_loaders[0]
         train_ds = underlying(cl0.dataset)
-        if getattr(train_ds, "data", None) is None:
+        if getattr(train_ds, "data", None) is None and name.lower() != "food101":
             raise TypeError("underlying train set has no .data (not torchvision)")
-        store = GPUImageStore.from_torchvision(train_ds, name, device)
+        store = GPUImageStore.from_torchvision(train_ds, name, device, train=True)
         new_cl = []
         for cid, cl in enumerate(data.client_loaders):
             idx = indices_of(cl.dataset, len(train_ds))
@@ -172,7 +238,7 @@ def wrap_build_data(data, name, batch_size, seed, device):
 
         tl = data.test_loader
         test_ds = underlying(tl.dataset)
-        test_store = GPUImageStore.from_torchvision(test_ds, name, device)
+        test_store = GPUImageStore.from_torchvision(test_ds, name, device, train=False)
         test_idx = indices_of(tl.dataset, len(test_ds))
         new_test = FastLoader(test_store, test_idx, batch_size=256, train=False, seed=0)
 
