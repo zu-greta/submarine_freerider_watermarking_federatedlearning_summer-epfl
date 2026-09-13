@@ -92,15 +92,15 @@ FIGURES = [
                  "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor "
                  "-- the classes the free-rider hides behind in Fig.~\\ref{fig:fig3a_class_ber}."),
 
-    # ---- fig4: FedIPR-sign final BER vs #watermarked layers (the fix) ----
-    dict(name="fig4_layers", kind="layers",
-         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
-         layers=[1, 2, 4], eta_t=0.20, eta_l=0.50,
-         caption="FedIPR white-box sign watermark (CIFAR-100, 3 seeds): final watermark BER "
-                 "vs.\\ the number of normalization layers the mark is embedded into, for "
-                 "honest clients and our head-only free-rider. At one (output) layer the "
-                 "free-rider evades; embedding into deeper layers it cannot retrain pushes its "
-                 "BER above the threshold -- the defence against our attack. Error bars are "
+    # ---- fig4: FedIPR-sign -- ADAPTIVE free-rider cost vs #watermarked layers ----
+    dict(name="fig4_cost_layers", kind="costlayers",
+         fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
+         caption="FedIPR white-box sign watermark (CIFAR-100): an \\emph{adaptive} free-rider "
+                 "widens the scope it retrains to cover the sign wherever it is embedded, so its "
+                 "watermark BER stays near zero -- it always evades. But its compute, as a "
+                 "fraction of an honest client's, climbs from $\\approx0.3$ at one (output) layer "
+                 "toward $1.0$ (honest) once the mark spans the full depth: deep embedding does "
+                 "not stop evasion, it removes the free-rider's compute saving. Error bars are "
                  "$\\pm 1$ s.d.\\ over seeds."),
 ]
 
@@ -511,12 +511,53 @@ def emit_layers(fig, runs, out, tail):
     if el is not None:
         eta += f"\\addplot[chonest,densely dashed,forget plot] coordinates {{({nlmin},{el}) ({nlmax},{el})}};\n"
     tex = (fig_open(fig, "xlabel={number of watermarked layers $N$},ylabel={final watermark BER},"
-                    "xtick=data,ymin=0,legend pos=north west") +
+                    "xtick=data,ymin=0,legend pos=north west,unbounded coords=discard") +
            f"\\addplot[cfr,mark=*,error bars/.cd,y dir=both,y explicit] "
            f"table[x=nl,y=fr,y error=fr_sd]{{{dat}}};\\addlegendentry{{free-rider (ours)}}\n"
            f"\\addplot[chonest,mark=square*,error bars/.cd,y dir=both,y explicit] "
            f"table[x=nl,y=hon,y error=hon_sd]{{{dat}}};\\addlegendentry{{honest}}\n"
            f"{eta}" + fig_close(fig))
+    return dat, tex
+
+
+def emit_costlayers(fig, runs, out, tail):
+    """fig4 (cost framing): an adaptive free-rider vs #watermarked layers N.
+    Two series on one [0,1] axis: (i) its compute as a fraction of an honest client's
+    (effort_ratio_gpu, within-run FR/honest) -- rises toward 1.0 as the mark deepens;
+    (ii) its watermark BER (tail-mean wm_fr_ber) -- stays ~0, it always evades."""
+    def seed_vals(fam):
+        rr = runs.get(fam, [])
+        costs, bers = [], []
+        for r in rr:
+            c = (r.get("compute", {}).get("summary", {}) or {}).get("effort_ratio_gpu")
+            if c is not None:
+                costs.append(c)
+            v = [h["wm_fr_ber"] for h in _hist(r, tail) if h.get("wm_fr_ber") is not None]
+            if v:
+                bers.append(st.mean(v))
+        return costs, bers
+    rows = []
+    for nl in fig["layers"]:
+        costs, bers = seed_vals(fig["fr_fmt"].format(nl=nl))
+        if not costs and not bers:
+            continue
+        cm, cs = _ms(costs); bm, bs = _ms(bers)
+        rows.append((nl, cm, cs, bm, bs))
+    if not rows:
+        return None
+    dat = f"{fig['name']}.dat"
+    write_dat(os.path.join(out, "data", dat), ["nl", "cost", "cost_sd", "ber", "ber_sd"], rows)
+    nlmin, nlmax = rows[0][0], rows[-1][0]
+    tex = (fig_open(fig, "xlabel={number of watermarked layers $N$},"
+                    "ylabel={fraction of honest cost / watermark BER},"
+                    "xtick=data,ymin=0,ymax=1.08,legend pos=north west,unbounded coords=discard") +
+           f"\\addplot[chonest,densely dashed,forget plot] coordinates {{({nlmin},1) ({nlmax},1)}};\n"
+           f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{nlmax},1) {{honest cost}};\n"
+           f"\\addplot[cfr,mark=*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=cost,y error=cost_sd]{{{dat}}};\\addlegendentry{{FR compute (rel.\\ honest)}}\n"
+           f"\\addplot[cprev,mark=square*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=ber,y error=ber_sd]{{{dat}}};\\addlegendentry{{FR watermark BER}}\n"
+           + fig_close(fig))
     return dat, tex
 
 # ============================================================================
@@ -605,6 +646,7 @@ def emit_savings(fig, runs, out, tail):
 EMIT = {"timeline": emit_timeline, "costtable": emit_costtable,
         "attackcompare": emit_attackcompare, "classbars": emit_classbars,
         "classscatter": emit_classscatter, "layers": emit_layers,
+        "costlayers": emit_costlayers,
         "band": emit_band, "overlap": emit_overlap, "savings": emit_savings}
 
 def main():

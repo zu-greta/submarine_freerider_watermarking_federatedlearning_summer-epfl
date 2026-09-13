@@ -266,6 +266,41 @@ def fig_layers(spec, runs, out, tail):
     ax.legend(fontsize=10, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
     _save(fig, out, spec["name"])
 
+
+def fig_costlayers(spec, runs, out, tail):
+    """Cost framing: an adaptive free-rider vs # watermarked layers N"""
+    def seed_vals(fam):
+        costs, bers = [], []
+        for r in runs.get(fam, []):
+            c = (r.get("compute", {}).get("summary", {}) or {}).get("effort_ratio_gpu")
+            if c is not None: costs.append(c)
+            v = [h["wm_fr_ber"] for h in _hist(r, tail) if h.get("wm_fr_ber") is not None]
+            if v: bers.append(st.mean(v))
+        return costs, bers
+    rows = []
+    for nl in spec["layers"]:
+        costs, bers = seed_vals(spec["fr_fmt"].format(nl=nl))
+        if not costs and not bers:
+            continue
+        cm, cs = _ms(costs); bm, bs = _ms(bers)
+        rows.append((nl, cm, cs, bm, bs))
+    if not rows:
+        print(f"  skip {spec['name']} (no adaptive-sweep families present)"); return
+    fig, ax = plt.subplots(figsize=(5.6, 3.6))
+    nls = [r[0] for r in rows]
+    ax.axhline(1.0, color=C_HONEST, ls="--", lw=1)
+    ax.text(nls[-1], 1.0, " honest cost", fontsize=9, va="bottom", ha="right")
+    ax.errorbar(nls, [r[1] for r in rows], yerr=[r[2] for r in rows], color=C_FR,
+                marker="o", ms=5, lw=1.8, capsize=3, label="FR compute (rel. honest)")
+    ax.errorbar(nls, [r[3] for r in rows], yerr=[r[4] for r in rows], color=C_PREV,
+                marker="s", ms=5, lw=1.8, capsize=3, label="FR watermark BER")
+    ax.set_xticks(nls); ax.set_xlabel("number of watermarked layers $N$")
+    ax.set_ylabel("fraction of honest cost / watermark BER"); ax.set_ylim(0, 1.08)
+    ax.grid(axis="x", visible=False)
+    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+    ax.legend(fontsize=10, loc="center left"); ax.set_title(spec.get("title", ""), fontsize=11)
+    _save(fig, out, spec["name"])
+
 # ============================================================================
 # tab1: cost table -> CSV + rendered PNG
 # ============================================================================
@@ -327,12 +362,12 @@ FIGS = [
          eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign: attack comparison"),
     dict(name="fig3_class_difficulty", kind="classdiff",
          honest="A1_honest_c100", fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17"]),
-    dict(name="fig4_layers", kind="layers",
-         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
-         layers=[1, 2, 4], eta_t=0.20, eta_l=0.50, title="White-box: more layers beats the free-rider"),
+    dict(name="fig4_cost_layers", kind="costlayers",
+         fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
+         title="White-box: adaptive free-rider pays honest cost as the mark deepens"),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
-        "layers": fig_layers, "costtable": tab_costs}
+        "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs}
 
 def main():
     ap = argparse.ArgumentParser()

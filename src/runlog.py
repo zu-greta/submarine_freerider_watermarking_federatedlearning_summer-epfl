@@ -31,9 +31,9 @@ def _kv(k, v, pad=26):
 # --------------------------------------------------------------------- banner
 def banner(log, *, config_idx, cfg, repeat, seed, device, gpu_name=None,
            gpu_count=0, family=None, note=None, output_dir=None):
-    """Run identity. First thing in run.log; answers 'what am I looking at?'."""
+    """Run identity. First thing in run.log."""
     log.info(_rule("="))
-    log.info(f"  FareMark run | {cfg.name}  (config {config_idx})")
+    log.info(f"  Testing run | {cfg.name}  (config {config_idx})")
     log.info(_rule("="))
     log.info(_kv("family", family or "(none -- set FAMILY= to group runs for plots)"))
     log.info(_kv("model / dataset", f"{cfg.model} / {cfg.dataset}"))

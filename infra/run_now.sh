@@ -385,6 +385,21 @@ if has L; then
         FAMILY="L5_graftblock_head2_c17" \
         NOTE="L5 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 1,7)" \
         ./submit_experiment.sh 14 "$s"
+    # -----------------------------------------------------------------------
+    # HEAD-ONLY variants (TAP_SCOPE=head = the softmax fc ONLY, last 2 tensors:
+    #   fc.weight, fc.bias). 
+    # -----------------------------------------------------------------------
+    # L6 -- head scope (softmax fc only), hard classes 3,6
+    env $lbase TAP_SCOPE=head   TAP_COAST_MODE=decay \
+        FAMILY="L6_graftblock_head_c36" \
+        NOTE="L6 graftblock reduced cpc5 + HEAD (softmax fc only, last 2 tensors) (classes 3,6)" \
+        ./submit_experiment.sh 14 "$s"
+    # L7 -- head scope (softmax fc only), easy classes 1,7
+    env $lbase TAP_SCOPE=head   TAP_COAST_MODE=decay \
+        FREE_RIDER_IDS=1,7 \
+        FAMILY="L7_graftblock_head_c17" \
+        NOTE="L7 graftblock reduced cpc5 + HEAD (softmax fc only, last 2 tensors) (classes 1,7)" \
+        ./submit_experiment.sh 14 "$s"
   done
 fi
 
@@ -426,6 +441,13 @@ if has F; then
     env $FI $fbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
         FAMILY="F_L5_graftblock_head2_c17_fi" \
         NOTE="F_L5 FedIPR graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
+    # HEAD-ONLY (TAP_SCOPE=head = softmax fc only, last 2 tensors). 
+    env $FI $fbase TAP_SCOPE=head TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
+        FAMILY="F_L6_graftblock_head_c36_fi" \
+        NOTE="F_L6 FedIPR graftblock HEAD softmax-fc-only (hard 3,6)" ./submit_experiment.sh 14 "$s"
+    env $FI $fbase TAP_SCOPE=head TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
+        FAMILY="F_L7_graftblock_head_c17_fi" \
+        NOTE="F_L7 FedIPR graftblock HEAD softmax-fc-only (easy 1,7)" ./submit_experiment.sh 14 "$s"
   done
   # F_K9 / F_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
   # fkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
@@ -487,6 +509,13 @@ if has G; then
     env $GI $gbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
         FAMILY="G_L5_graftblock_head2_c17_ws" \
         NOTE="G_L5 FedIPR-sign graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
+    # HEAD-ONLY (TAP_SCOPE=head = softmax fc only, last 2 tensors) - white box lives in head2
+    env $GI $gbase TAP_SCOPE=head TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
+        FAMILY="G_L6_graftblock_head_c36_ws" \
+        NOTE="G_L6 FedIPR-sign graftblock HEAD softmax-fc-only (hard 3,6)" ./submit_experiment.sh 14 "$s"
+    env $GI $gbase TAP_SCOPE=head TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
+        FAMILY="G_L7_graftblock_head_c17_ws" \
+        NOTE="G_L7 FedIPR-sign graftblock HEAD softmax-fc-only (easy 1,7)" ./submit_experiment.sh 14 "$s"
   done
   # G_K9 / G_K4 -- submarine head2 + block2 (self-eta, derived margin, dynamic warmup).
   # gkbase="ATTACK=adaptive_tap AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 \
@@ -546,6 +575,9 @@ if has FD; then
   #     FAMILY="H6_gaussian_c100" NOTE="FD FareMark gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
   env ATTACK=graftblock $gb WM_ETA_FIXED=0.064 \
       FAMILY="L1_graftblock_head2_c36" NOTE="FD FareMark graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # HEAD-ONLY (TAP_SCOPE=head overrides the head2 in $gb).
+  env ATTACK=graftblock $gb TAP_SCOPE=head WM_ETA_FIXED=0.064 \
+      FAMILY="L6_graftblock_head_c36" NOTE="FD FareMark graftblock HEAD softmax-fc-only (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
 
   # ---- FedIPR backdoor ----  (noise triggers = self-contained, no SVHN download on the pod)
   # FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-noise} FEDIPR_NUM_TRIGGER=40 FEDIPR_TARGET_MODE=cid"
@@ -568,6 +600,61 @@ if has FD; then
   #     FAMILY="G_H6_gaussian_c100_ws" NOTE="FD sign gaussian control (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
   env $GI ATTACK=graftblock $gb WM_ETA_FIXED=0.20 \
       FAMILY="G_L1_graftblock_head2_c36_ws" NOTE="FD sign graftblock head2 (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+  # HEAD-ONLY (TAP_SCOPE=head overrides the head2 in $gb).
+  env $GI ATTACK=graftblock $gb TAP_SCOPE=head WM_ETA_FIXED=0.20 \
+      FAMILY="G_L6_graftblock_head_c36_ws" NOTE="FD sign graftblock HEAD softmax-fc-only (food101)" ./submit_experiment.sh $CIDX "$SEED_FD"
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP HS -- 1-SEED head/sweep bundle (CIFAR-100)
+#   Runs:
+#     (a) FareMark   HEAD-only free-rider, classes 3,6   
+#     (b) FedIPR backdoor HEAD-only free-rider, 3,6       
+#     (c) FedIPR SIGN spread sweep, free-rider fixed at graftblock HEAD2 (3,6):
+#           1 -> 4 carrier layers (auto_last_bn) -> ALL BN (full depth)
+# ---------------------------------------------------------------------------
+if has HS; then
+  echo " Group HS -- 1-seed head/sweep bundle (cifar100)"
+  SEEDS_HS="${SEEDS_HS:-0}"
+  # backdoor trigger source: match the F group (noise)
+  FI_HS="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-noise} \
+         FEDIPR_NUM_TRIGGER=${FEDIPR_NUM_TRIGGER:-40} FEDIPR_TARGET_MODE=${FEDIPR_TARGET_MODE:-cid}"
+  GI_HS="WM_SCHEME=fedipr_sign FEDIPR_SIGN_BITS=40 FEDIPR_SIGN_MARGIN=0.1 FEDIPR_SIGN_LAMBDA=1.0"
+  # shared graftblock knobs (reduced cpc5 tap, honest warmup 12 / calib 4)
+  gb_hs="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
+         AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 FREE_RIDER_IDS=3,6"
+
+  for s in $SEEDS_HS; do
+    # (a) FareMark: honest floor + HEAD-only FR (softmax fc only), classes 3,6
+    # env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+    #     FAMILY="A1_honest_c100" NOTE="HS FareMark honest floor" ./submit_experiment.sh 14 "$s"
+    env $gb_hs TAP_SCOPE=head TAP_COAST_MODE=decay WM_ETA_FIXED=0.064 \
+        FAMILY="L6_graftblock_head_c36" NOTE="HS FareMark graftblock HEAD (softmax fc only) 3,6" \
+        ./submit_experiment.sh 14 "$s"
+
+    # (b) FedIPR backdoor (black box): honest floor + HEAD-only FR, classes 3,6
+    # env $FI_HS ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+    #     FAMILY="F_A1_honest_c100_fi" NOTE="HS FedIPR-backdoor honest floor" ./submit_experiment.sh 14 "$s"
+    env $FI_HS $gb_hs TAP_SCOPE=head TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
+        FAMILY="F_L6_graftblock_head_c36_fi" NOTE="HS FedIPR-backdoor graftblock HEAD 3,6" \
+        ./submit_experiment.sh 14 "$s"
+
+    # (c) FedIPR SIGN spread sweep -- cost changes with adaptive FR (widens scope to retrain to cover wherever server embeds wm)
+    #       N = FEDIPR_SIGN_LAYERS = num BN scales (output->body) carry the sign
+    #       Scopes: head2 covers 1, block2 covers 6, full 20.
+    #         N=1  -> scope head2  (1 carrier, cheap)
+    #         N=6  -> scope block2 (layer4 BN block, medium)
+    #         N=20 -> scope full   (all BN == honest-equivalent compute)
+    declare -A ADAPT_SCOPE=( [1]=head2 [6]=block2 [20]=full )
+    for NL in 1 6 20; do
+      SC=${ADAPT_SCOPE[$NL]}
+      GIL="$GI_HS FEDIPR_SIGN_LAYERS=$NL FEDIPR_SIGN_CARRIER=auto_last_bn"
+      env $GIL $gb_hs TAP_SCOPE=$SC TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
+          FAMILY="G_Ladapt_c36_ws_L${NL}" \
+          NOTE="HS sign ADAPTIVE FR (scope=$SC covers ${NL} carrier layer(s)), classes 3,6" \
+          ./submit_experiment.sh 14 "$s"
+    done
+  done
 fi
 
 N=$(grep -c . "$JOBS_FILE" 2>/dev/null || echo 0)

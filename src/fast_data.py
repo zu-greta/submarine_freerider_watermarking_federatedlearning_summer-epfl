@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 import numpy as np
 import torch
@@ -14,8 +15,17 @@ _NORM = {
     "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 }
 
+# Food-101 fast-path knobs (env-overridable; FOOD_SIZE mirrors datasets.py).
 FOOD_SIZE = int(os.environ.get("FOOD_SIZE", "64"))
+# translation-crop padding for GPU-side augmentation of the food TRAIN store
+# (cheap stand-in for RandomResizedCrop; set FOOD_FAST_PAD=0 to disable aug).
 FOOD_PAD = int(os.environ.get("FOOD_FAST_PAD", "8"))
+# Concurrency knobs for the one-time Food-101 decode+cache (see _food_arrays).
+# When a whole pool of workers starts a food101 batch and the cache does not yet
+# exist, exactly ONE worker decodes while the others wait and then load it.
+FOOD_CACHE_WAIT = int(os.environ.get("FOOD_CACHE_WAIT", "3600"))   # max s a waiter blocks
+FOOD_CACHE_POLL = int(os.environ.get("FOOD_CACHE_POLL", "5"))      # poll interval (s)
+FOOD_CACHE_STALE = int(os.environ.get("FOOD_CACHE_STALE", "1800")) # lock age (s) => builder died
 
 
 class GPUImageStore:
@@ -37,7 +47,8 @@ class GPUImageStore:
 
     @classmethod
     def from_torchvision(cls, ds, name: str, device, pad: int = 4, train: bool = True):
-        """Pull the raw uint8 array out of a torchvision dataset, or decode every image
+        """Pull the raw uint8 array out of a torchvision dataset, or -- for JPEG
+        datasets like Food-101 that have no in-memory `.data` -- decode every image
         once into a uint8 tensor and cache it to disk for later runs."""
         name = name.lower()
         mean, std = _NORM[name]
@@ -56,7 +67,7 @@ class GPUImageStore:
         else:
             raise TypeError(f"{type(ds).__name__} has no .data and no decoder for '{name}'")
 
-        # Only the train store gets GPU-side crop+flip augmentation.
+        # Only the TRAIN store gets GPU-side crop+flip augmentation.
         if train and name in ("cifar10", "cifar100"):
             pad = pad if pad else 4
         elif train and name == "food101":
@@ -77,7 +88,12 @@ def _labels_of(ds):
 
 
 # ---------------------------------------------------------------------------
-# Food-101: decode every JPEG once into a uint8 [N,C,S,S] tensor + disk cache
+# Food-101: decode every JPEG once into a uint8 [N,C,S,S] tensor + disk cache.
+# torchvision's Food101 has no in-memory .data, so the DataLoader re-decodes
+# every image every epoch -- that is what starves the GPU. We decode once at
+# FOOD_SIZE, cache to <root>/food-101/cache/, and serve GPU-resident thereafter.
+# The array index matches the torchvision dataset index (image_files[i]/labels[i]),
+# so the client shard indices still line up.
 # ---------------------------------------------------------------------------
 def _decode_food_to_uint8(ds, size):
     from PIL import Image
@@ -109,25 +125,95 @@ def _decode_food_to_uint8(ds, size):
     return arr, torch.as_tensor(labs, dtype=torch.long)
 
 
+def _try_load_cache(cache):
+    """Load a finished cache blob, or None if it is absent / not yet readable."""
+    if not os.path.exists(cache):
+        return None
+    try:
+        blob = torch.load(cache, map_location="cpu")
+        print(f"  [fast_data] loaded food101 cache {cache} {tuple(blob['images'].shape)}")
+        return blob["images"], blob["labels"]
+    except Exception as e:                       # partial/mid-write file -> treat as absent
+        print(f"  [fast_data] cache not readable yet ({type(e).__name__}: {e}); retrying")
+        return None
+
+
 def _food_arrays(ds, split, size):
-    """Return (images_u8 [N,C,size,size], labels), decoding+caching on first use."""
+    """Return (images_u8 [N,C,size,size], labels) for Food-101, decoding+caching once
+    """
     base = getattr(ds, "_base_folder", None) or \
         os.path.join(str(getattr(ds, "root", ".")), "food-101")
     cache_dir = os.path.join(str(base), "cache")
     cache = os.path.join(cache_dir, f"food101_{split}_{size}.pt")
-    if os.path.exists(cache):
-        blob = torch.load(cache, map_location="cpu")
-        print(f"  [fast_data] loaded food101 cache {cache} {tuple(blob['images'].shape)}")
-        return blob["images"], blob["labels"]
-    print(f"  [fast_data] decoding food101 '{split}' -> {size}px (one-time; caching)")
-    imgs, labs = _decode_food_to_uint8(ds, size)
+    lockdir = cache + ".lock"                     # os.mkdir is atomic -> single builder
+
+    got = _try_load_cache(cache)
+    if got is not None:
+        return got
+
     try:
         os.makedirs(cache_dir, exist_ok=True)
-        torch.save({"images": imgs, "labels": labs}, cache)
-        print(f"  [fast_data] cached food101 '{split}' -> {cache} {tuple(imgs.shape)}")
     except Exception as e:
-        print(f"  [fast_data] cache write skipped ({type(e).__name__}: {e})")
-    return imgs, labs
+        print(f"  [fast_data] cache dir unavailable ({type(e).__name__}: {e}); "
+              f"decoding food101 '{split}' in-process (no cache)")
+        return _decode_food_to_uint8(ds, size)
+
+    for _ in range(4):                            # build, or wait-then-load, a few times
+        got = _try_load_cache(cache)
+        if got is not None:
+            return got
+        try:
+            os.mkdir(lockdir)                     # sole builder
+            builder = True
+        except FileExistsError:
+            builder = False                       # someone else is building -> wait
+
+        if builder:
+            try:
+                print(f"  [fast_data] decoding food101 '{split}' -> {size}px "
+                      f"(one-time; other workers will wait)")
+                imgs, labs = _decode_food_to_uint8(ds, size)
+                tmp = f"{cache}.tmp.{os.getpid()}"
+                torch.save({"images": imgs, "labels": labs}, tmp)
+                os.replace(tmp, cache)            # atomic publish (same filesystem)
+                print(f"  [fast_data] cached food101 '{split}' -> {cache} {tuple(imgs.shape)}")
+                return imgs, labs
+            except Exception as e:
+                print(f"  [fast_data] cache build failed ({type(e).__name__}: {e}); "
+                      f"using freshly decoded arrays in-process")
+                try:
+                    return imgs, labs             # decode already succeeded above
+                except NameError:
+                    return _decode_food_to_uint8(ds, size)
+            finally:
+                try:
+                    os.rmdir(lockdir)
+                except OSError:
+                    pass
+        else:
+            print(f"  [fast_data] another worker is building the food101 '{split}' cache; "
+                  f"waiting (up to {FOOD_CACHE_WAIT}s)")
+            waited = 0
+            while waited < FOOD_CACHE_WAIT:
+                time.sleep(FOOD_CACHE_POLL)
+                waited += FOOD_CACHE_POLL
+                got = _try_load_cache(cache)
+                if got is not None:
+                    return got
+                if not os.path.isdir(lockdir):
+                    break                          # builder finished/vanished -> re-check
+                try:                               # stale lock => builder died mid-decode
+                    if time.time() - os.path.getmtime(lockdir) > FOOD_CACHE_STALE:
+                        os.rmdir(lockdir)
+                        break                      # take over on the next outer iteration
+                except OSError:
+                    pass
+            # loop back: either the cache is now there, or we try to build it ourselves
+
+    # last resort (timed out waiting, never got the lock): decode in-process
+    print(f"  [fast_data] gave up waiting for the shared cache; "
+          f"decoding food101 '{split}' in-process")
+    return _decode_food_to_uint8(ds, size)
 
 
 class _IndexView:
