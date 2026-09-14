@@ -41,16 +41,33 @@ plt.rcParams.update({
 # ============================================================================
 # loading / aggregation (over seeds)
 # ============================================================================
-def load(res_glob):
+def _dataset_of(r):
+    return ((r.get("summary") or {}).get("dataset")
+            or (r.get("config") or {}).get("dataset")
+            or (r.get("manifest") or {}).get("dataset"))
+
+
+def load(res_glob, dataset=None):
+    """Group by family; if `dataset` is set, keep only that dataset's runs. Food-101
+    reuses the CIFAR-100 family names, so without this a mixed folder merges datasets."""
     runs = defaultdict(list)
+    seen = defaultdict(set)
     for f in sorted(glob.glob(res_glob)):
         try:
             r = json.load(open(f))
         except Exception as e:
             print(f"  (skip {f}: {e})"); continue
+        ds = _dataset_of(r)
+        if dataset and ds and ds != dataset:
+            continue
         fam = (r.get("manifest", {}) or {}).get("family")
         if fam:
-            runs[fam].append(r)
+            runs[fam].append(r); seen[fam].add(ds)
+    if not dataset:
+        mixed = sorted(fam for fam, dss in seen.items() if len({d for d in dss if d}) > 1)
+        if mixed:
+            print("  [WARN] families span >1 dataset and will be MERGED "
+                  "(pass --dataset to separate): " + ", ".join(mixed))
     return runs
 
 def _hist(r, tail=0):
@@ -170,7 +187,8 @@ def fig_attack(spec, runs, out, tail):
     if rounds:
         bm = [_ms(benR[rd]) for rd in rounds]
         _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
-    style = {"previous models": (C_PREV, "s"), "gaussian": (C_ACC, "^"), "ours (head2)": (C_FR, "o")}
+    style = {"previous models": (C_PREV, "s"), "gaussian": (C_ACC, "^"),
+             "ours (head2)": (C_FR, "o"), "ours (head)": (C_FR, "o")}
     for lbl, fam in present:
         fR = per_round(runs.get(fam), "wm_fr_ber")
         rr = sorted(fR)
@@ -362,9 +380,35 @@ FIGS = [
          eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign: attack comparison"),
     dict(name="fig3_class_difficulty", kind="classdiff",
          honest="A1_honest_c100", fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17"]),
-    dict(name="fig4_cost_layers", kind="costlayers",
+    dict(name="fig4a_detection_layers", kind="layers",
+         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
+         layers=[1, 6, 20], eta_t=0.20, eta_l=0.50,
+         title="White-box: deeper embedding catches the fixed free-rider"),
+    dict(name="fig4b_cost_layers", kind="costlayers",
          fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
          title="White-box: adaptive free-rider pays honest cost as the mark deepens"),
+
+    # ---- HEAD figures (fc only, last 2 tensors) ----
+    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
+         eta_t=0.064, eta_l=0.264, title="FareMark (head-only): honest vs free-rider"),
+    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
+         eta_t=0.20, eta_l=0.50, title="FedIPR backdoor (head-only): honest vs free-rider"),
+    dict(name="fig1_sign_timeline_head", kind="timeline", fr="G_L6_graftblock_head_c36_ws",
+         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head-only): honest vs free-rider"),
+    dict(name="tab1_costs_head", kind="costtable",
+         rows=[("FareMark", "L6_graftblock_head_c36"),
+               ("FedIPR", "F_L6_graftblock_head_c36_fi"),
+               ("FedIPR-sign", "G_L6_graftblock_head_c36_ws")]),
+    dict(name="fig2_attack_compare_head", kind="attack", honest="A1_honest_c100",
+         attacks=[("previous models", "H5_prevmodel_c100"), ("gaussian", "H6_gaussian_c100"),
+                  ("ours (head)", "L6_graftblock_head_c36")],
+         eta_t=0.064, eta_l=0.264, title="FareMark (head-only): attack comparison"),
+    dict(name="fig2_sign_attack_compare_head", kind="attack", honest="G_A1_honest_c100_ws",
+         attacks=[("previous models", "G_H5_prevmodel_c100_ws"), ("gaussian", "G_H6_gaussian_c100_ws"),
+                  ("ours (head)", "G_L6_graftblock_head_c36_ws")],
+         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head-only): attack comparison"),
+    dict(name="fig3_class_difficulty_head", kind="classdiff",
+         honest="A1_honest_c100", fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
         "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs}
@@ -375,8 +419,11 @@ def main():
     ap.add_argument("--out", default="figs")
     ap.add_argument("--tail", type=int, default=20)
     ap.add_argument("--only", default=None, help="comma-separated figure names")
+    ap.add_argument("--dataset", default=None,
+                    help="keep only runs from this dataset (cifar100 | food101); set it "
+                         "when a results folder mixes datasets (families are shared).")
     a = ap.parse_args()
-    runs = load(a.res)
+    runs = load(a.res, a.dataset)
     print(f"loaded families: {sorted(runs)}")
     only = set(a.only.split(",")) if a.only else None
     print(f">>> PAPER FIGURES (matplotlib) -> {a.out}")

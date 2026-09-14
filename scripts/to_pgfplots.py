@@ -92,8 +92,21 @@ FIGURES = [
                  "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor "
                  "-- the classes the free-rider hides behind in Fig.~\\ref{fig:fig3a_class_ber}."),
 
-    # ---- fig4: FedIPR-sign -- ADAPTIVE free-rider cost vs #watermarked layers ----
-    dict(name="fig4_cost_layers", kind="costlayers",
+    # ---- fig4a: DETECTION -- FIXED head2 free-rider, final BER vs #watermarked layers ----
+    #   Claim A: hold the attacker at its cheap head2 scope; as the mark spreads past head2
+    #   the free-rider cannot maintain the deep bits -> BER rises above eta -> caught.
+    dict(name="fig4a_detection_layers", kind="layers",
+         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
+         layers=[1, 6, 20], eta_t=0.20, eta_l=0.50,
+         caption="FedIPR white-box sign (CIFAR-100): final watermark BER vs.\\ the number of "
+                 "layers the server embeds the sign into, for honest clients and a \\emph{fixed} "
+                 "head2 free-rider (does not adapt its scope). At one output layer the free-rider "
+                 "re-embeds and evades; embedding deeper -- past its head2 reach -- pushes its BER "
+                 "above the threshold: deeper embedding \\emph{catches} the naive free-rider. "
+                 "Error bars are $\\pm 1$ s.d.\\ over seeds."),
+
+    # ---- fig4b: COST -- ADAPTIVE free-rider cost vs #watermarked layers ----
+    dict(name="fig4b_cost_layers", kind="costlayers",
          fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
          caption="FedIPR white-box sign watermark (CIFAR-100): an \\emph{adaptive} free-rider "
                  "widens the scope it retrains to cover the sign wherever it is embedded, so its "
@@ -102,6 +115,57 @@ FIGURES = [
                  "toward $1.0$ (honest) once the mark spans the full depth: deep embedding does "
                  "not stop evasion, it removes the free-rider's compute saving. Error bars are "
                  "$\\pm 1$ s.d.\\ over seeds."),
+
+    # ======================================================================
+    # HEAD figures (TAP_SCOPE=head = softmax fc only,last 2 tensors)
+    # ======================================================================
+    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
+         eta_t=0.064, eta_l=0.264,
+         caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
+                 "(softmax fc only, last 2 tensors). The output-space mark is re-embeddable by "
+                 "the fc alone, so the free-rider still evades. Bands are $\\pm 1$ s.d."),
+    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
+                 "The fc alone re-memorises the trigger set, so the free-rider evades. "
+                 "Bands are $\\pm 1$ s.d."),
+    dict(name="fig1_sign_timeline_head", kind="timeline", fr="G_L6_graftblock_head_c36_ws",
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR white-box sign (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider "
+                 "(fc only). The sign carrier is the last BN scale, which is NOT in the fc, so a "
+                 "head-only free-rider cannot maintain its bits and is CAUGHT -- unlike the "
+                 "output-space schemes above. Bands are $\\pm 1$ s.d."),
+
+    dict(name="tab1_costs_head", kind="costtable",
+         rows=[("FareMark", "L6_graftblock_head_c36"),
+               ("FedIPR",   "F_L6_graftblock_head_c36_fi"),
+               ("FedIPR-sign", "G_L6_graftblock_head_c36_ws")],
+         caption="Per-client training cost of an honest client vs.\\ our HEAD-ONLY free-rider "
+                 "(reduced data + softmax fc only), CIFAR-100, mean $\\pm$ s.d.\\ over seeds. "
+                 "GPU cost is the within-run free-rider/honest GPU-time ratio."),
+
+    dict(name="fig2_attack_compare_head", kind="attackcompare", honest="A1_honest_c100",
+         attacks=[("previous models", "H5_prevmodel_c100"),
+                  ("gaussian",        "H6_gaussian_c100"),
+                  ("ours (head)",     "L6_graftblock_head_c36")],
+         eta_t=0.064, eta_l=0.264,
+         caption="FareMark (CIFAR-100): free-rider BER vs.\\ round for the two baselines and our "
+                 "HEAD-ONLY attack (softmax fc only). The baselines are caught; ours evades. "
+                 "Bands are $\\pm 1$ s.d."),
+    dict(name="fig2_sign_attack_compare_head", kind="attackcompare", honest="G_A1_honest_c100_ws",
+         attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
+                  ("gaussian",        "G_H6_gaussian_c100_ws"),
+                  ("ours (head)",     "G_L6_graftblock_head_c36_ws")],
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR white-box sign (CIFAR-100): free-rider BER vs.\\ round for the two "
+                 "baselines and our HEAD-ONLY attack (fc only). Here our head-only attack is "
+                 "caught alongside the baselines, because the sign carrier sits below the fc. "
+                 "Bands are $\\pm 1$ s.d."),
+
+    dict(name="fig3a_class_ber_head", kind="classbars",
+         honest="A1_honest_c100", fr="L6_graftblock_head_c36",
+         caption="FareMark (CIFAR-100): per trigger-class watermark BER, honest vs.\\ our "
+                 "HEAD-ONLY free-rider (softmax fc only). Bars are mean $\\pm 1$ s.d.\\ over seeds."),
 ]
 
 # ============================================================================
@@ -150,16 +214,33 @@ AXBASE = ("width=\\linewidth,height=4.2cm,cycle list={{chonest},{cfr},{black}},"
 
 
 # ----------------------------------------------------------------------------
-def load(res_glob):
+def _dataset_of(r):
+    """The dataset a result was produced on (summary > config > manifest)."""
+    return ((r.get("summary") or {}).get("dataset")
+            or (r.get("config") or {}).get("dataset")
+            or (r.get("manifest") or {}).get("dataset"))
+
+
+def load(res_glob, dataset=None):
+    """Group result.json by family"""
     runs = defaultdict(list)
+    seen = defaultdict(set)
     for f in sorted(glob.glob(res_glob)):
         try:
             r = json.load(open(f))
         except Exception as e:
             print(f"  (skip {f}: {e})"); continue
+        ds = _dataset_of(r)
+        if dataset and ds and ds != dataset:
+            continue
         fam = (r.get("manifest", {}) or {}).get("family")
         if fam:
-            runs[fam].append(r)
+            runs[fam].append(r); seen[fam].add(ds)
+    if not dataset:
+        mixed = sorted(fam for fam, dss in seen.items() if len({d for d in dss if d}) > 1)
+        if mixed:
+            print("  [WARN] families span >1 dataset and will be MERGED "
+                  "(pass --dataset to separate): " + ", ".join(mixed))
     return runs
 
 def _hist(r, tail=0):
@@ -655,12 +736,16 @@ def main():
     ap.add_argument("--out", default="export")
     ap.add_argument("--tail", type=int, default=20)
     ap.add_argument("--only", default=None)
+    ap.add_argument("--dataset", default=None,
+                    help="keep only runs from this dataset (e.g. cifar100 | food101); "
+                         "Food-101 reuses CIFAR-100 family names, so set this when a "
+                         "results folder mixes datasets.")
     ap.add_argument("--appendix", action="store_true",
                     help="emit the APPENDIX_FIGURES set instead of the paper set.")
     a = ap.parse_args()
     os.makedirs(os.path.join(a.out, "data"), exist_ok=True)
     os.makedirs(os.path.join(a.out, "fig"), exist_ok=True)
-    runs = load(a.res)
+    runs = load(a.res, a.dataset)
     print(f"loaded families: {sorted(runs)}")
     figset = APPENDIX_FIGURES if a.appendix else FIGURES
     only = set(a.only.split(",")) if a.only else None

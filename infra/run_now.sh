@@ -538,7 +538,7 @@ if has G; then
 
   # ---- LAYER SWEEP: "more watermarked layers beats the free-rider" -----------
   #   For each layer count NL, an honest calibration family + a graftblock head2 FR 3,6
-  for NL in ${SIGN_LAYERS_SWEEP:-1 2 4}; do
+  for NL in ${SIGN_LAYERS_SWEEP:-1 6 20}; do   # match fig4a/fig4b x-points (head2=1, block2=6, full=20)
     GIL="$GI FEDIPR_SIGN_LAYERS=$NL"
     for s in 0 1 2; do
       env $GIL ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
@@ -652,6 +652,21 @@ if has HS; then
       env $GIL $gb_hs TAP_SCOPE=$SC TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
           FAMILY="G_Ladapt_c36_ws_L${NL}" \
           NOTE="HS sign ADAPTIVE FR (scope=$SC covers ${NL} carrier layer(s)), classes 3,6" \
+          ./submit_experiment.sh 14 "$s"
+    done
+
+    # (d) FedIPR SIGN spread sweep -- DETECTION with a FIXED head2 free-rider 
+    for NL in 1 6 20; do
+      GIL="$GI_HS FEDIPR_SIGN_LAYERS=$NL FEDIPR_SIGN_CARRIER=auto_last_bn"
+      # honest floor at this depth (sign honest BER ~0 at every N)
+      env $GIL ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+          FAMILY="G_A1_honest_c100_ws_L${NL}" \
+          NOTE="HS sign honest floor, ${NL} carrier layer(s) (for detection fig4a)" \
+          ./submit_experiment.sh 14 "$s"
+      # FIXED head2 free-rider (does NOT widen scope) -> caught as N grows
+      env $GIL $gb_hs TAP_SCOPE=head2 TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
+          FAMILY="G_L1_graftblock_head2_c36_ws_L${NL}" \
+          NOTE="HS sign FIXED head2 FR, sign in ${NL} layer(s) -- detection (3,6)" \
           ./submit_experiment.sh 14 "$s"
     done
   done

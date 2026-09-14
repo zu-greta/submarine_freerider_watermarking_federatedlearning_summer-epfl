@@ -86,10 +86,10 @@ phase_submit(){
 # ---------------------------------------------------------------------------
 phase_plot(){
   mkdir -p "$EXPORT" "$FIGS"
-  echo ">>> PAPER FIGURES (pgfplots) -> $EXPORT"
-  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL"
-  echo ">>> PAPER FIGURES (matplotlib) -> $FIGS"
-  run "$MP --res '$ALL' --out '$FIGS' --tail $TAIL"
+  echo ">>> PAPER FIGURES (pgfplots) -> $EXPORT   [dataset=$DATASET]"
+  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL --dataset $DATASET"
+  echo ">>> PAPER FIGURES (matplotlib) -> $FIGS   [dataset=$DATASET]"
+  run "$MP --res '$ALL' --out '$FIGS' --tail $TAIL --dataset $DATASET"
   echo "   pgfplots menu: $EXPORT/all_figures.tex  (Overleaf: $EXPORT/README_OVERLEAF.md)"
   echo "   matplotlib PNG/PDF: $FIGS"
 }
