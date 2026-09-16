@@ -2,7 +2,7 @@
 """to_pgfplots -- turn result.json runs into pgfplots-ready .dat tables + .tex figures
 =======================================================================================
 default (3 seeds, std shown):
-  fig1  timeline BER vs round, honest vs OUR free-rider (reduced + head2) -- FareMark,
+  fig1  timeline BER vs round, honest vs our free-rider (reduced + head2) -- FareMark,
         FedIPR, sign  -> fig1_faremark_timeline / fig1_fedipr_timeline / fig1_sign_timeline
   tab1  cost table (samples + GPU-time, honest vs FR) FareMark/FedIPR/sign     -> tab1_costs
   fig2  BER vs round: gaussian vs previous-models vs OUR attack -- FareMark,
@@ -33,32 +33,23 @@ FIGURES = [
     dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head2_c36",
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100, 3 seeds): watermark BER vs.\\ communication round for "
-                 "honest clients and our reduced-data head-only free-rider. The free-rider "
-                 "re-embeds the mark and its BER stays inside the honest band, below the "
-                 "detection threshold. Bands are $\\pm 1$ s.d.\\ over seeds."),
+                 "honest clients and our reduced-data head-only free-rider. Bands are $\\pm 1$ s.d.\\ over seeds."),
     dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
-                 "vs.\\ round for honest clients and our head-only free-rider. Same outcome as "
-                 "FareMark: the free-rider evades. Bands are $\\pm 1$ s.d."),
+                 "vs.\\ round for honest clients and our head-only free-rider. Bands are $\\pm 1$ s.d."),
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds, 1 output layer): watermark BER "
-                 "(=Hamming$/N$) vs.\\ round for honest clients and our head2 free-rider. The "
-                 "free-rider re-embeds the single-layer sign mark and evades, same as the "
-                 "black-box schemes. Bands are $\\pm 1$ s.d."),
+                 "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d."),
 
-    # ---- tab1: cost of honest vs OUR free-rider, all three schemes ----
+    # ---- tab1: cost of honest vs our free-rider, all three schemes ----
     dict(name="tab1_costs", kind="costtable",
          rows=[("FareMark", "L1_graftblock_head2_c36"),
                ("FedIPR",   "F_L1_graftblock_head2_c36_fi"),
                ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")],
          caption="Per-client training cost of an honest client vs.\\ our free-rider "
-                 "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over seeds. Samples are "
-                 "device-independent; GPU cost is the within-run free-rider/honest GPU-time "
-                 "ratio (honest and free-rider are timed in the same run under identical GPU "
-                 "load, so the ratio is unaffected by how many jobs shared the pool). "
-                 "Both columns show the free-rider needs $\\approx\\!0.3\\times$ an honest client."),
+                 "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over seeds."),
 
     # ---- fig2: attack comparison (gaussian / previous-models / ours), FareMark ----
     dict(name="fig2_attack_compare", kind="attackcompare", honest="A1_honest_c100",
@@ -67,30 +58,24 @@ FIGURES = [
                   ("ours (head2)",    "L1_graftblock_head2_c36")],
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the two "
-                 "baseline attacks (previous-models, Gaussian) and ours. The baselines sit "
-                 "near chance (caught); ours stays in the honest band (evades). "
-                 "Bands are $\\pm 1$ s.d."),
+                 "baseline attacks (Previous-models, Gaussian noise) and ours. Bands are $\\pm 1$ s.d."),
     dict(name="fig2_sign_attack_compare", kind="attackcompare", honest="G_A1_honest_c100_ws",
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
                   ("gaussian",        "G_H6_gaussian_c100_ws"),
                   ("ours (head2)",    "G_L1_graftblock_head2_c36_ws")],
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the "
-                 "two baseline attacks (previous-models, Gaussian) and ours. The baselines climb "
-                 "to chance ($0.5$, caught); ours stays at the honest floor (evades). "
-                 "Bands are $\\pm 1$ s.d."),
+                 "two baseline attacks (Previous-models, Gaussian noise) and ours. Bands are $\\pm 1$ s.d."),
 
     # ---- fig3: FareMark class difficulty -- TWO plots: (a) BER bars, (b) entropy ----
     dict(name="fig3a_class_ber", kind="classbars",
          honest="A1_honest_c100", fr="L1_graftblock_head2_c36",
          caption="FareMark (CIFAR-100, 3 seeds): per trigger-class watermark BER for honest "
-                 "clients vs.\\ our free-rider. Harder classes have a higher honest floor; the "
-                 "free-rider sits at or below it. Bars are mean $\\pm 1$ s.d.\\ over seeds."),
+                 "clients vs.\\ our free-rider. Bars are mean $\\pm 1$ s.d.\\ over seeds."),
     dict(name="fig3b_class_entropy", kind="classscatter", honest="A1_honest_c100",
          caption="FareMark (CIFAR-100, 3 seeds): watermark BER floor ($\\Delta$BER, mean over "
                  "seeds) vs.\\ softmax entropy on the trigger class, one labelled point per class. "
-                 "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor "
-                 "-- the classes the free-rider hides behind in Fig.~\\ref{fig:fig3a_class_ber}."),
+                 "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor."),
 
     # ---- fig4a: DETECTION -- FIXED head2 free-rider, final BER vs #watermarked layers ----
     #   Claim A: hold the attacker at its cheap head2 scope; as the mark spreads past head2
@@ -101,8 +86,7 @@ FIGURES = [
          caption="FedIPR white-box sign (CIFAR-100): final watermark BER vs.\\ the number of "
                  "layers the server embeds the sign into, for honest clients and a \\emph{fixed} "
                  "head2 free-rider (does not adapt its scope). At one output layer the free-rider "
-                 "re-embeds and evades; embedding deeper -- past its head2 reach -- pushes its BER "
-                 "above the threshold: deeper embedding \\emph{catches} the naive free-rider. "
+                 "re-embeds and evades; embedding deeper into the model layers pushes its BER up. "
                  "Error bars are $\\pm 1$ s.d.\\ over seeds."),
 
     # ---- fig4b: COST -- ADAPTIVE free-rider cost vs #watermarked layers ----
@@ -110,11 +94,9 @@ FIGURES = [
          fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
          caption="FedIPR white-box sign watermark (CIFAR-100): an \\emph{adaptive} free-rider "
                  "widens the scope it retrains to cover the sign wherever it is embedded, so its "
-                 "watermark BER stays near zero -- it always evades. But its compute, as a "
-                 "fraction of an honest client's, climbs from $\\approx0.3$ at one (output) layer "
-                 "toward $1.0$ (honest) once the mark spans the full depth: deep embedding does "
-                 "not stop evasion, it removes the free-rider's compute saving. Error bars are "
-                 "$\\pm 1$ s.d.\\ over seeds."),
+                 "watermark BER stays near zero and it always evades. But its compute, as a "
+                 "fraction of an honest client's, climbs towards $1.0$ (honest) once the mark spans the full depth" \
+                 "Error bars are $\\pm 1$ s.d.\\ over seeds."),
 
     # ======================================================================
     # HEAD figures (TAP_SCOPE=head = softmax fc only,last 2 tensors)
@@ -122,13 +104,12 @@ FIGURES = [
     dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
-                 "(softmax fc only, last 2 tensors). The output-space mark is re-embeddable by "
-                 "the fc alone, so the free-rider still evades. Bands are $\\pm 1$ s.d."),
+                 "(softmax fc only, last 2 tensors). Bands are $\\pm 1$ s.d."),
     dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
-                 "The fc alone re-memorises the trigger set, so the free-rider evades. "
                  "Bands are $\\pm 1$ s.d."),
+    # not run 
     dict(name="fig1_sign_timeline_head", kind="timeline", fr="G_L6_graftblock_head_c36_ws",
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider "
@@ -141,8 +122,7 @@ FIGURES = [
                ("FedIPR",   "F_L6_graftblock_head_c36_fi"),
                ("FedIPR-sign", "G_L6_graftblock_head_c36_ws")],
          caption="Per-client training cost of an honest client vs.\\ our HEAD-ONLY free-rider "
-                 "(reduced data + softmax fc only), CIFAR-100, mean $\\pm$ s.d.\\ over seeds. "
-                 "GPU cost is the within-run free-rider/honest GPU-time ratio."),
+                 "(reduced data + softmax fc only), CIFAR-100, mean $\\pm$ s.d.\\ over seeds."),
 
     dict(name="fig2_attack_compare_head", kind="attackcompare", honest="A1_honest_c100",
          attacks=[("previous models", "H5_prevmodel_c100"),
@@ -150,17 +130,14 @@ FIGURES = [
                   ("ours (head)",     "L6_graftblock_head_c36")],
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100): free-rider BER vs.\\ round for the two baselines and our "
-                 "HEAD-ONLY attack (softmax fc only). The baselines are caught; ours evades. "
-                 "Bands are $\\pm 1$ s.d."),
+                 "HEAD-ONLY attack (softmax fc only). Bands are $\\pm 1$ s.d."),
     dict(name="fig2_sign_attack_compare_head", kind="attackcompare", honest="G_A1_honest_c100_ws",
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
                   ("gaussian",        "G_H6_gaussian_c100_ws"),
                   ("ours (head)",     "G_L6_graftblock_head_c36_ws")],
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100): free-rider BER vs.\\ round for the two "
-                 "baselines and our HEAD-ONLY attack (fc only). Here our head-only attack is "
-                 "caught alongside the baselines, because the sign carrier sits below the fc. "
-                 "Bands are $\\pm 1$ s.d."),
+                 "baselines and our HEAD-ONLY attack (fc only). Bands are $\\pm 1$ s.d."),
 
     dict(name="fig3a_class_ber_head", kind="classbars",
          honest="A1_honest_c100", fr="L6_graftblock_head_c36",
@@ -403,8 +380,7 @@ def emit_costtable(fig, runs, out, tail):
         hs_m, hs_s = col("honest_mean_samples"); fs_m, fs_s = col("fr_mean_samples")
         # GPU cost as the WITHIN-RUN free-rider/honest ratio (effort_ratio_gpu), averaged
         # over seeds. honest & FR are timed in the same run under the same GPU contention,
-        # so this ratio is concurrency-robust -- unlike absolute gpu_ms, it does NOT depend
-        # on how many jobs shared the GPU. (samples ratio is contention-free by construction.)
+        # so this ratio is concurrency-robust 
         gr_m, gr_s = col("effort_ratio_gpu")
         ratio_s = (fs_m / hs_m) if hs_m else float("nan")
         rows.append((label, n, hs_m, hs_s, fs_m, fs_s, gr_m, gr_s, ratio_s))
@@ -764,8 +740,8 @@ def main():
         f.write("% \\input this, or copy individual \\input lines where you want each float.\n")
         for n in made:
             f.write(f"\\input{{plots/export/fig/{n}.tex}}\n")
-    open(os.path.join(a.out, "preamble_snippet.tex"), "w").write(PREAMBLE)
-    open(os.path.join(a.out, "README_OVERLEAF.md"), "w").write(README)
+    # open(os.path.join(a.out, "preamble_snippet.tex"), "w").write(PREAMBLE)
+    # open(os.path.join(a.out, "README_OVERLEAF.md"), "w").write(README)
     kind = "appendix" if a.appendix else "paper"
     print(f"\n{len(made)} {kind} figures -> {a.out}/  (menu: {a.out}/{menu})")
 

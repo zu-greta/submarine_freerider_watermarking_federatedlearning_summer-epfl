@@ -62,6 +62,7 @@ def load(res_glob, dataset=None):
             continue
         fam = (r.get("manifest", {}) or {}).get("family")
         if fam:
+            r["__src"] = f                         # remember the source file (for the per-fig seed report)
             runs[fam].append(r); seen[fam].add(ds)
     if not dataset:
         mixed = sorted(fam for fam, dss in seen.items() if len({d for d in dss if d}) > 1)
@@ -129,10 +130,11 @@ def compute_col(runs, key):
 
 def _save(fig, out, name):
     os.makedirs(out, exist_ok=True)
-    for ext in ("png", "pdf"):
+    for ext in ("png",):            # PNG only -- PDF output disabled ("pdf" removed)
         fig.savefig(os.path.join(out, f"{name}.{ext}"), bbox_inches="tight")
     plt.close(fig)
-    print(f"  wrote {name}.png / .pdf")
+    print(f"  wrote {name}.png")
+    return True                     # signal "produced" so main() prints the seed report
 
 def _band(ax, rounds, mean, sd, color, label, marker=None):
     lo = [max(0.0, m - s) for m, s in zip(mean, sd)]
@@ -157,17 +159,18 @@ def fig_timeline(spec, runs, out, tail):
     ax.axvspan(tstart, rounds[-1], color="#DDDDDD", alpha=0.4, linewidth=0)
     _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
     _band(ax, rounds, [m for m, s in fm], [s for m, s in fm], C_FR, "free-rider (ours)", marker="o")
-    if spec.get("eta_t") is not None:
-        ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
-        ax.text(rounds[0], spec["eta_t"], r" $\eta_t$", va="bottom", fontsize=10)
-    if spec.get("eta_l") is not None:
-        ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
-        ax.text(rounds[0], spec["eta_l"], r" $\eta_\ell$", va="bottom", fontsize=10)
+    # -- threshold lines disabled for now (commented out) --
+    # if spec.get("eta_t") is not None:
+    #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
+    #     ax.text(rounds[0], spec["eta_t"], r" $\eta_t$", va="bottom", fontsize=10)
+    # if spec.get("eta_l") is not None:
+    #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
+    #     ax.text(rounds[0], spec["eta_l"], r" $\eta_\ell$", va="bottom", fontsize=10)
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
     ax.set_ylim(bottom=0); ax.grid(axis="x", visible=False)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.legend(fontsize=10, loc="upper right"); ax.set_title(spec.get("title", ""), fontsize=11)
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # fig2: attack comparison (prev-model / gaussian / ours)
@@ -197,15 +200,16 @@ def fig_attack(spec, runs, out, tail):
         col, mk = style.get(lbl, (C_FR, "o"))
         ms = [_ms(fR[rd]) for rd in rr]
         _band(ax, rr, [m for m, s in ms], [s for m, s in ms], col, lbl, marker=mk)
-    if spec.get("eta_t") is not None:
-        ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
-    if spec.get("eta_l") is not None:
-        ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
+    # -- threshold lines disabled for now (commented out) --
+    # if spec.get("eta_t") is not None:
+    #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
+    # if spec.get("eta_l") is not None:
+    #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
     ax.set_ylim(0, 1); ax.grid(axis="x", visible=False)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.legend(fontsize=9, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # fig3: class difficulty -- grouped bars + DeltaBER-vs-entropy scatter
@@ -246,7 +250,7 @@ def fig_classdiff(spec, runs, out, tail):
         axR.set_xlim(min(ex) - 0.08*dx, max(ex) + 0.12*dx); axR.margins(y=0.12)
     for ax in (axL, axR):
         ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # fig4: white-box final BER vs # watermarked layers
@@ -273,16 +277,17 @@ def fig_layers(spec, runs, out, tail):
                 marker="o", ms=5, lw=1.8, capsize=3, label="free-rider (ours)")
     ax.errorbar(nls, [r[3] for r in rows], yerr=[r[4] for r in rows], color=C_HONEST,
                 marker="s", ms=5, lw=1.8, capsize=3, label="honest")
-    if spec.get("eta_t") is not None:
-        ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1); ax.text(nls[-1], spec["eta_t"], r" $\eta_t$", fontsize=10, va="bottom", ha="right")
-    if spec.get("eta_l") is not None:
-        ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1)
+    # -- threshold lines disabled for now (commented out) --
+    # if spec.get("eta_t") is not None:
+    #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1); ax.text(nls[-1], spec["eta_t"], r" $\eta_t$", fontsize=10, va="bottom", ha="right")
+    # if spec.get("eta_l") is not None:
+    #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1)
     ax.set_xticks(nls); ax.set_xlabel("number of watermarked layers $N$")
     ax.set_ylabel("final watermark BER"); ax.set_ylim(bottom=0)
     ax.grid(axis="x", visible=False)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.legend(fontsize=10, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 
 def fig_costlayers(spec, runs, out, tail):
@@ -317,7 +322,7 @@ def fig_costlayers(spec, runs, out, tail):
     ax.grid(axis="x", visible=False)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.legend(fontsize=10, loc="center left"); ax.set_title(spec.get("title", ""), fontsize=11)
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # tab1: cost table -> CSV + rendered PNG
@@ -354,7 +359,7 @@ def tab_costs(spec, runs, out, tail):
         if r_i == 0:
             cell.set_text_props(weight="bold"); cell.set_facecolor("#EEEEEE")
         cell.set_edgecolor("#CCCCCC")
-    _save(fig, out, spec["name"])
+    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # figure registry -- families kept in lock-step with to_pgfplots.py
@@ -413,6 +418,53 @@ FIGS = [
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
         "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs}
 
+
+# ============================================================================
+# per-figure seed / source-file report (so you can confirm ALL seeds were read)
+# ============================================================================
+def _spec_families(spec):
+    """The result families a figure pulls from (used only for the report)."""
+    k = spec["kind"]
+    if k == "timeline":
+        return [spec["fr"]]
+    if k == "attack":
+        return ([spec["honest"]] if spec.get("honest") else []) + [fam for _, fam in spec["attacks"]]
+    if k == "classdiff":
+        return [spec["honest"]] + list(spec["fr"])
+    if k == "layers":
+        return ([spec["honest_fmt"].format(nl=nl) for nl in spec["layers"]]
+                + [spec["fr_fmt"].format(nl=nl) for nl in spec["layers"]])
+    if k == "costlayers":
+        return [spec["fr_fmt"].format(nl=nl) for nl in spec["layers"]]
+    if k == "costtable":
+        return [fam for _, fam in spec["rows"]]
+    return []
+
+
+def _runtag(r):
+    """'.../<FAMILY>_rep<seed>/result.json' -> '<FAMILY>_rep<seed>' (shows the seed)."""
+    src = r.get("__src", "")
+    return os.path.basename(os.path.dirname(src)) or os.path.basename(src) or "?"
+
+
+def _report(spec, runs):
+    """Print how many seeds + which files fed the figure that was just produced."""
+    fams = _spec_families(spec)
+    total = set()
+    lines = []
+    for fam in fams:
+        rr = runs.get(fam, [])
+        if rr:
+            tags = sorted(_runtag(r) for r in rr)
+            lines.append(f"        {fam}: {len(rr)} seed(s)  [{', '.join(tags)}]")
+            total.update(r.get("__src") for r in rr)
+        else:
+            lines.append(f"        {fam}: MISSING (0 seeds)")
+    print(f"    -> {spec['name']}: read {len(total)} result.json over {len(fams)} family(ies)")
+    for ln in lines:
+        print(ln)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--res", required=True)
@@ -430,7 +482,9 @@ def main():
     for spec in FIGS:
         if only and spec["name"] not in only:
             continue
-        EMIT[spec["kind"]](spec, runs, a.out, a.tail)
+        produced = EMIT[spec["kind"]](spec, runs, a.out, a.tail)   # emitters now return True when a png was written
+        if produced:                                               # only report for figures that were actually made
+            _report(spec, runs)                                    # print seed count + which result.json files fed it
 
 if __name__ == "__main__":
     main()
