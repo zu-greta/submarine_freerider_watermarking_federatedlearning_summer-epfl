@@ -29,53 +29,77 @@ from collections import defaultdict
 # PAPER FIGURES  (the only ones emitted by default) -- 3 seeds, std shown
 # ============================================================================
 FIGURES = [
-    # ---- fig1: honest vs OUR free-rider (reduced data + head2), timeline, cifar-100 ----
-    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head2_c36",
+    # ==========================================================================
+    # FareMark (box-free) -- HEAD-ONLY free-rider (softmax fc only, last 2 tensors).
+    #   head2 versions dropped: FareMark is displayed as head-only.
+    # ==========================================================================
+    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
          eta_t=0.064, eta_l=0.264,
-         caption="FareMark (CIFAR-100, 3 seeds): watermark BER vs.\\ communication round for "
-                 "honest clients and our reduced-data head-only free-rider. Bands are $\\pm 1$ s.d.\\ over seeds."),
-    dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
-                 "vs.\\ round for honest clients and our head-only free-rider. Bands are $\\pm 1$ s.d."),
+         caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
+                 "(softmax fc only, last 2 tensors), hard classes 3,6. Bands are $\\pm 1$ s.d.",
+         takeaway="(last layer only version - use this instead of fig1 - this is on the hard classes) Restricting the free-rider to the softmax fc alone is still enough to re-embed "
+                  "the FareMark mark and evade."),
+    dict(name="fig1_faremark_timeline_head_c17", kind="timeline", fr="L7_graftblock_head_c17",
+         eta_t=0.064, eta_l=0.264,
+         caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
+                 "(softmax fc only), \\emph{easy} classes 1,7 -- companion to the hard-class panel. "
+                 "Bands are $\\pm 1$ s.d.",
+         takeaway="same as beofre but on the easy classes 1,7 to show the BER of a FR can be below the honset even"),
+
+    # ==========================================================================
+    # FedIPR white-box sign -- HEAD2 free-rider only (carrier lives in head2).
+    #   head-only sign versions dropped.
+    # ==========================================================================
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds, 1 output layer): watermark BER "
-                 "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d."),
+                 "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d.",
+         takeaway="(white box fedipr style, resnet18, cifar100. use this for output layer white box scheme)"
+                  "same story as faremark timeline, 0.5 BER is random and 0 is best. FR and honest match to avoid detection."
+                  "white box version has much lower BER in general since sign watermark encodes each bit as the sign of a chosen weight + no sampling noise or softmax projection and class difficulty"),
 
-    # ---- tab1: cost of honest vs our free-rider, all three schemes ----
+    # ---- tab1: ONE combined cost table -- FareMark (head) + white-box sign (head2) ----
     dict(name="tab1_costs", kind="costtable",
-         rows=[("FareMark", "L1_graftblock_head2_c36"),
-               ("FedIPR",   "F_L1_graftblock_head2_c36_fi"),
-               ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")],
-         caption="Per-client training cost of an honest client vs.\\ our free-rider "
-                 "(reduced data + head2), CIFAR-100, mean $\\pm$ s.d.\\ over seeds."),
+         rows=[("FareMark (head)", ["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
+               ("FedIPR-sign (head2)", ["G_L1_graftblock_head2_c36_ws"])],
+         caption="Per-client training cost of an honest client vs.\\ our free-rider: FareMark with "
+                 "a HEAD-only (softmax fc) free-rider and the FedIPR white-box sign with a head2 "
+                 "free-rider, CIFAR-100, mean $\\pm$ s.d.\\ over seeds. The FareMark row averages the "
+                 "easy (1,7) and hard (3,6) free-riders, since the free-rider's cost is "
+                 "class-independent (same scope, same reduced shard).",
+         takeaway="The free-rider matches the honest watermark BER while spending only "
+                  "$\\approx\\!0.28\\times$ the honest client's samples and GPU time -- evasion is cheap."),
 
-    # ---- fig2: attack comparison (gaussian / previous-models / ours), FareMark ----
-    dict(name="fig2_attack_compare", kind="attackcompare", honest="A1_honest_c100",
+    # ---- fig2: attack comparison (previous-models / gaussian / ours) ----
+    dict(name="fig2_attack_compare_head", kind="attackcompare", honest="A1_honest_c100", ymax=0.8,
          attacks=[("previous models", "H5_prevmodel_c100"),
                   ("gaussian",        "H6_gaussian_c100"),
-                  ("ours (head2)",    "L1_graftblock_head2_c36")],
+                  ("ours (head)",     "L6_graftblock_head_c36")],
          eta_t=0.064, eta_l=0.264,
-         caption="FareMark (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the two "
-                 "baseline attacks (Previous-models, Gaussian noise) and ours. Bands are $\\pm 1$ s.d."),
-    dict(name="fig2_sign_attack_compare", kind="attackcompare", honest="G_A1_honest_c100_ws",
+         caption="FareMark (CIFAR-100): free-rider BER vs.\\ round for the two baselines and our "
+                 "HEAD-ONLY attack (softmax fc only). Bands are $\\pm 1$ s.d.",
+         takeaway="(good plot) last layer only FR compared to the easy FR attacks from paper"),
+    dict(name="fig2_sign_attack_compare", kind="attackcompare", honest="G_A1_honest_c100_ws", ymax=0.8,
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
                   ("gaussian",        "G_H6_gaussian_c100_ws"),
                   ("ours (head2)",    "G_L1_graftblock_head2_c36_ws")],
          eta_t=0.20, eta_l=0.50,
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the "
-                 "two baseline attacks (Previous-models, Gaussian noise) and ours. Bands are $\\pm 1$ s.d."),
+                 "two baseline attacks (previous-models, Gaussian) and ours. Bands are $\\pm 1$ s.d.",
+         takeaway="(use this version for white box schemes) Same picture for the white-box sign mark: the baselines are caught at chance, "
+                  "our head2 free-rider evades at the honest floor."),
 
-    # ---- fig3: FareMark class difficulty -- TWO plots: (a) BER bars, (b) entropy ----
-    dict(name="fig3a_class_ber", kind="classbars",
-         honest="A1_honest_c100", fr="L1_graftblock_head2_c36",
-         caption="FareMark (CIFAR-100, 3 seeds): per trigger-class watermark BER for honest "
-                 "clients vs.\\ our free-rider. Bars are mean $\\pm 1$ s.d.\\ over seeds."),
+    # ---- fig3: FareMark class difficulty -- (a) per-class BER bars (head), (b) entropy ----
+    dict(name="fig3a_class_ber_head", kind="classbars",
+         honest="A1_honest_c100", fr="L6_graftblock_head_c36",
+         caption="FareMark (CIFAR-100): per trigger-class watermark BER, honest vs.\\ our "
+                 "HEAD-ONLY free-rider (softmax fc only). Bars are mean $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="The fc-only free-rider still matches the honest per-class BER floor."),
     dict(name="fig3b_class_entropy", kind="classscatter", honest="A1_honest_c100",
          caption="FareMark (CIFAR-100, 3 seeds): watermark BER floor ($\\Delta$BER, mean over "
                  "seeds) vs.\\ softmax entropy on the trigger class, one labelled point per class. "
-                 "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor."),
+                 "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor.",
+         takeaway="Harder, lower-entropy trigger classes carry a higher honest BER floor"),
 
     # ---- fig4a: DETECTION -- FIXED head2 free-rider, final BER vs #watermarked layers ----
     #   Claim A: hold the attacker at its cheap head2 scope; as the mark spreads past head2
@@ -87,62 +111,29 @@ FIGURES = [
                  "layers the server embeds the sign into, for honest clients and a \\emph{fixed} "
                  "head2 free-rider (does not adapt its scope). At one output layer the free-rider "
                  "re-embeds and evades; embedding deeper into the model layers pushes its BER up. "
-                 "Error bars are $\\pm 1$ s.d.\\ over seeds."),
+                 "Error bars are $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="(fedipr white box - showing possible solution by embedding into more layers. this version forces honest to embed deeper but FR still does head2 work and gets caught)"),
 
     # ---- fig4b: COST -- ADAPTIVE free-rider cost vs #watermarked layers ----
     dict(name="fig4b_cost_layers", kind="costlayers",
          fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
-         caption="FedIPR white-box sign watermark (CIFAR-100): an \\emph{adaptive} free-rider "
+         caption="FedIPR white-box sign watermark (CIFAR-100): an adaptive free-rider "
                  "widens the scope it retrains to cover the sign wherever it is embedded, so its "
                  "watermark BER stays near zero and it always evades. But its compute, as a "
-                 "fraction of an honest client's, climbs towards $1.0$ (honest) once the mark spans the full depth" \
-                 "Error bars are $\\pm 1$ s.d.\\ over seeds."),
+                 "fraction of an honest client's, climbs towards $1.0$ (honest) once the mark spans "
+                 "the full depth. Error bars are $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="fedipr white box - same as above but the FR also emebds more layers to match the hoenst, and cost goes up to more than 50 percent"),
 
-    # ======================================================================
-    # HEAD figures (TAP_SCOPE=head = softmax fc only,last 2 tensors)
-    # ======================================================================
-    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
-         eta_t=0.064, eta_l=0.264,
-         caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
-                 "(softmax fc only, last 2 tensors). Bands are $\\pm 1$ s.d."),
-    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
-                 "Bands are $\\pm 1$ s.d."),
-    # not run 
-    dict(name="fig1_sign_timeline_head", kind="timeline", fr="G_L6_graftblock_head_c36_ws",
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR white-box sign (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider "
-                 "(fc only). The sign carrier is the last BN scale, which is NOT in the fc, so a "
-                 "head-only free-rider cannot maintain its bits and is CAUGHT -- unlike the "
-                 "output-space schemes above. Bands are $\\pm 1$ s.d."),
-
-    dict(name="tab1_costs_head", kind="costtable",
-         rows=[("FareMark", "L6_graftblock_head_c36"),
-               ("FedIPR",   "F_L6_graftblock_head_c36_fi"),
-               ("FedIPR-sign", "G_L6_graftblock_head_c36_ws")],
-         caption="Per-client training cost of an honest client vs.\\ our HEAD-ONLY free-rider "
-                 "(reduced data + softmax fc only), CIFAR-100, mean $\\pm$ s.d.\\ over seeds."),
-
-    dict(name="fig2_attack_compare_head", kind="attackcompare", honest="A1_honest_c100",
-         attacks=[("previous models", "H5_prevmodel_c100"),
-                  ("gaussian",        "H6_gaussian_c100"),
-                  ("ours (head)",     "L6_graftblock_head_c36")],
-         eta_t=0.064, eta_l=0.264,
-         caption="FareMark (CIFAR-100): free-rider BER vs.\\ round for the two baselines and our "
-                 "HEAD-ONLY attack (softmax fc only). Bands are $\\pm 1$ s.d."),
-    dict(name="fig2_sign_attack_compare_head", kind="attackcompare", honest="G_A1_honest_c100_ws",
-         attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
-                  ("gaussian",        "G_H6_gaussian_c100_ws"),
-                  ("ours (head)",     "G_L6_graftblock_head_c36_ws")],
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR white-box sign (CIFAR-100): free-rider BER vs.\\ round for the two "
-                 "baselines and our HEAD-ONLY attack (fc only). Bands are $\\pm 1$ s.d."),
-
-    dict(name="fig3a_class_ber_head", kind="classbars",
-         honest="A1_honest_c100", fr="L6_graftblock_head_c36",
-         caption="FareMark (CIFAR-100): per trigger-class watermark BER, honest vs.\\ our "
-                 "HEAD-ONLY free-rider (softmax fc only). Bars are mean $\\pm 1$ s.d.\\ over seeds."),
+    # ---- fig4c: COST -- ADAPTIVE free-rider on the FULL common-class data (cpc=-1) ----
+    #   same as fig4b but the adaptive FR trains on the full data budget (G_Ladaptfull_*).
+    dict(name="fig4c_cost_layers_full", kind="costlayers",
+         fr_fmt="G_Ladaptfull_c36_ws_L{nl}", layers=[1, 6, 20],   # cpc=-1 (full common-class data) variant of fig4b
+         caption="FedIPR white-box sign watermark (CIFAR-100): the adaptive free-rider of "
+                 "Fig.~\\ref{fig:fig4b_cost_layers} re-run with the FULL common-class data budget "
+                 "(cpc$=-1$) instead of the reduced cpc$=5$ shard, vs.\\ the number of watermarked "
+                 "layers $N$. Same two series: free-rider compute (fraction of an honest client) and "
+                 "free-rider watermark BER. Error bars are $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="(cpc=-1 full-data variant of fig4b -- EDIT ME) compare against fig4b to see how the data budget shifts the FR compute and BER."),
 ]
 
 # ============================================================================
@@ -150,28 +141,49 @@ FIGURES = [
 #   non-IID (E/EA), other datasets (food101), other models, band/overlap/savings, etc.
 # ============================================================================
 APPENDIX_FIGURES = [
+    # ---- FedIPR BACKDOOR (black-box) timelines -- MOVED here from the main paper set ----
+    dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
+                 "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d.",
+         takeaway="The black-box backdoor scheme behaves like FareMark: the head2 free-rider "
+                  "re-embeds the trigger set and evades at the honest floor."),
+    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
+         eta_t=0.20, eta_l=0.50,
+         caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
+                 "Bands are $\\pm 1$ s.d.",
+         takeaway="Even fc-only, the backdoor free-rider re-memorises the trigger set and evades."),
+
     dict(name="app_faremark_overlap", kind="overlap", honest="A1_honest_c100",
          fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
              "K9_alldyn_head2_c36", "K9_alldyn_head2_c17"], eta_t=0.064, eta_l=0.264,
          caption="Honest per-class BER band vs.\\ free-rider operating points (FareMark). "
-                 "Free-riders land inside the band; no single threshold separates them."),
+                 "Free-riders land inside the band; no single threshold separates them.",
+         takeaway="Every free-rider operating point falls inside the honest band, so no single "
+                  "BER threshold separates honest from free-rider."),
     dict(name="app_faremark_class_band", kind="band", family="A1_honest_c100",
-         caption="Per-trigger-class honest watermark BER (FareMark, CIFAR-100)."),
+         caption="Per-trigger-class honest watermark BER (FareMark, CIFAR-100).",
+         takeaway="The honest BER floor varies widely across classes, giving the free-rider a wide "
+                  "band to hide in."),
     dict(name="app_faremark_savings", kind="savings",
          fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
              "K9_alldyn_head2_c36", "K4_alldyn_block2_c36"],
-         caption="Free-rider cost as a fraction of an honest client (samples and GPU-time)."),
+         caption="Free-rider cost as a fraction of an honest client (samples and GPU-time).",
+         takeaway="Across scopes the free-rider costs only a small fraction of an honest client."),
     dict(name="app_fedipr_overlap", kind="overlap", honest="F_A1_honest_c100_fi",
          fr=["F_L1_graftblock_head2_c36_fi", "F_L5_graftblock_head2_c17_fi",
              "F_K9_alldyn_head2_c36_fi", "F_K9_alldyn_head2_c17_fi"], eta_t=0.20, eta_l=0.50,
-         caption="Honest band vs.\\ free-rider points (FedIPR backdoor)."),
+         caption="Honest band vs.\\ free-rider points (FedIPR backdoor).",
+         takeaway="Backdoor free-rider points sit inside the honest band -- same non-separability as FareMark."),
     dict(name="app_fedipr_sign_overlap", kind="overlap", honest="G_A1_honest_c100_ws",
          fr=["G_L1_graftblock_head2_c36_ws", "G_L5_graftblock_head2_c17_ws",
              "G_K9_alldyn_head2_c36_ws", "G_K9_alldyn_head2_c17_ws"], eta_t=0.20, eta_l=0.50,
-         caption="Honest band vs.\\ free-rider points (FedIPR white-box sign, 1 layer)."),
+         caption="Honest band vs.\\ free-rider points (FedIPR white-box sign, 1 layer).",
+         takeaway="At one carrier layer the sign free-rider points sit inside the honest band too."),
     dict(name="app_niid_timeline_c36", kind="timeline", fr="E2_reduced_niid_c36",
          eta_t=0.161, eta_l=0.576,
-         caption="Non-IID (Dirichlet $\\alpha{=}0.5$): honest vs.\\ reduced free-rider BER."),
+         caption="Non-IID (Dirichlet $\\alpha{=}0.5$): honest vs.\\ reduced free-rider BER.",
+         takeaway="The evasion persists under non-IID data."),
     # TODO(appendix): other datasets (food101 -> point --res at results/food101), other models,
     #   submarine tap views, alpha sweep, distribution-aware assignment (EA), accuracy panels.
 ]
@@ -309,13 +321,46 @@ def write_dat(path, header, rows):
         for row in rows:
             f.write(" ".join(f"{v:.5f}" if isinstance(v, float) else str(v) for v in row) + "\n")
 
+# short on-plot titles for the Overleaf figures -- keep terse (the \caption carries the
+# detail). Looked up by figure name in fig_open; a figure with no entry gets no title.
+TITLES = {
+    "fig1_faremark_timeline":        "FareMark style (head2): honest vs.\\ free-rider BER timeline",
+    "fig1_fedipr_timeline":          "FedIPR backdoor style (head2): honest vs.\\ free-rider BER timeline",
+    "fig1_sign_timeline":            "FedIPR white-box style (head2, 1 layer): honest vs.\\ free-rider BER timeline",
+    "fig2_attack_compare":           "FareMark style (head2): attack comparison",
+    "fig2_sign_attack_compare":      "FedIPR white-box style (head2): attack comparison",
+    "fig3a_class_ber":               "FareMark style (head2): per-class watermark BER",
+    "fig3b_class_entropy":           "FareMark style (head2): BER floor vs.\\ entropy",
+    "fig4a_detection_layers":        "FedIPR white-box style: deeper embedding catches the fixed free-rider",
+    "fig4b_cost_layers":             "FedIPR white-box style: adaptive free-rider pays honest cost",
+    "fig4c_cost_layers_full":        "FedIPR white-box style: adaptive free-rider, full data (cpc=-1)",
+    # head-only twins
+    "fig1_faremark_timeline_head":   "FareMark style (head, hard 3,6): honest vs.\\ free-rider BER timeline",
+    "fig1_faremark_timeline_head_c17": "FareMark style (head, easy 1,7): honest vs.\\ free-rider BER timeline",
+    "fig1_fedipr_timeline_head":     "FedIPR backdoor style (head): honest vs.\\ free-rider BER timeline",
+    "fig1_sign_timeline_head":       "FedIPR white-box style (head): honest vs.\\ free-rider BER timeline",
+    "fig2_attack_compare_head":      "FareMark style (head): attack comparison",
+    "fig2_sign_attack_compare_head": "FedIPR white-box style (head): attack comparison",
+    "fig3a_class_ber_head":          "FareMark style (head): per-class BER",
+}
+
 def fig_open(fig, axopts):
+    t = TITLES.get(fig["name"])                                        # short title above the axes (Overleaf)
+    title_opt = f"title={{{t}}},title style={{font=\\small,yshift=-2pt}}," if t else ""
     return (f"\\begin{{figure}}[t]\\centering\n{COLORDEF}"
-            f"\\begin{{tikzpicture}}\n\\begin{{axis}}[{AXBASE},{axopts}]\n")
+            f"\\begin{{tikzpicture}}\n\\begin{{axis}}[{AXBASE},{title_opt}{axopts}]\n")
+
+def _cap(fig):
+    """Caption + an optional bold one-sentence TAKEAWAY appended after it."""
+    cap = fig["caption"]
+    tk = fig.get("takeaway")
+    if tk:
+        cap += f" \\textbf{{Takeaway:}} {tk}"
+    return cap
 
 def fig_close(fig):
     return (f"\\end{{axis}}\n\\end{{tikzpicture}}\n"
-            f"\\caption{{{fig['caption']}}}\\label{{fig:{fig['name']}}}\n\\end{{figure}}\n")
+            f"\\caption{{{_cap(fig)}}}\\label{{fig:{fig['name']}}}\n\\end{{figure}}\n")
 
 # ============================================================================
 # PAPER emitters
@@ -339,30 +384,37 @@ def emit_timeline(fig, runs, out, tail):
               ["round","fr","fr_lo","fr_hi","hon","hon_lo","hon_hi"], rows)
     et, el = fig.get("eta_t"), fig.get("eta_l")
     tstart = max(1, rmax - tail + 1)
-    eta = ""
-    if et is not None:
-        eta += (f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
-                f"\\node[anchor=south west,font=\\scriptsize] at (axis cs:1,{et}) {{$\\eta_t$}};\n")
-    if el is not None:
-        eta += (f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
-                f"\\node[anchor=north west,font=\\scriptsize] at (axis cs:1,{el}) {{$\\eta_\\ell$}};\n")
-    tex = (fig_open(fig, "xlabel={communication round},ylabel={watermark BER},ymin=0,"
-                    "legend pos=north east") +
-           f"\\fill[ctail,opacity=0.5] (axis cs:{tstart},0) rectangle (rel axis cs:1,1);\n"
-           f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
-           f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
-           f"\\addplot[chonest!12,forget plot] fill between[of=hlo and hhi];\n"
-           f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{honest floor}}\n"
+    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+    # if et is not None:
+    #     eta += (f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
+    #             f"\\node[anchor=south west,font=\\scriptsize] at (axis cs:1,{et}) {{$\\eta_t$}};\n")
+    # if el is not None:
+    #     eta += (f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
+    #             f"\\node[anchor=north west,font=\\scriptsize] at (axis cs:1,{el}) {{$\\eta_\\ell$}};\n")
+    ymax = fig.get("ymax", 0.6)   # zoom the BER axis (default 0..0.6) so the honest/FR overlap is legible
+    # DRAW ORDER: free-rider first (underneath), honest band + mean LAST (on top) so the honest
+    # band is never hidden behind the FR fill. The honest band is kept semi-transparent, so where
+    # the two coincide (e.g. white-box sign, both ~0) the FR markers still show through it.
+    tex = (fig_open(fig, f"xlabel={{communication round}},ylabel={{watermark BER}},ymin=0,ymax={ymax},"
+                    "legend pos=north east,reverse legend") +   # reverse legend -> honest floor listed first
            f"\\addplot[name path=flo,draw=none,forget plot] table[x=round,y=fr_lo]{{{dat}}};\n"
            f"\\addplot[name path=fhi,draw=none,forget plot] table[x=round,y=fr_hi]{{{dat}}};\n"
            f"\\addplot[cfr!15,forget plot] fill between[of=flo and fhi];\n"
-           f"\\addplot[cfr,mark=*,mark size=1.1pt] table[x=round,y=fr]{{{dat}}};\\addlegendentry{{free-rider (ours)}}\n"
+           f"\\addplot[cfr,mark=*,mark size=1.1pt] table[x=round,y=fr]{{{dat}}};\\addlegendentry{{free-rider}}\n"
+           f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
+           f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
+           f"\\addplot[chonest!22,forget plot] fill between[of=hlo and hhi];\n"   # on top, a touch more opaque so the band reads
+           f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{honest floor}}\n"
            f"{eta}" + fig_close(fig))
     return dat, tex
 
 def _compute_cols(runs, fam):
-    """mean,std over seeds for honest/FR samples and gpu_ms from compute.summary."""
-    rr = runs.get(fam, [])
+    """mean,std over seeds for honest/FR samples and gpu_ms from compute.summary.
+    `fam` may be a single family or a list of families -- a list pools all their seeds
+    and averages across them (e.g. FareMark easy 1,7 + hard 3,6: cost is class-independent,
+    so the row is one averaged number; missing families are simply skipped)."""
+    fams = fam if isinstance(fam, (list, tuple)) else [fam]
+    rr = [r for f in fams for r in runs.get(f, [])]
     def col(key):
         vs = [(r.get("compute", {}).get("summary", {}) or {}).get(key) for r in rr]
         vs = [float(v) for v in vs if v is not None]
@@ -400,12 +452,15 @@ def emit_costtable(fig, runs, out, tail):
                  f"\\midrule\n")
     if body.endswith("\\midrule\n"):
         body = body[:-len("\\midrule\n")]
+    # -- "GPU / honest" = effort_ratio_gpu, "Samples / honest" = fr/honest sample ratio.
     tex = (f"\\begin{{table}}[t]\\centering\n"
-           f"\\caption{{{fig['caption']}}}\\label{{tab:{fig['name']}}}\n"
+           f"\\caption{{{_cap(fig)}}}\\label{{tab:{fig['name']}}}\n"
+           f"\\setlength{{\\tabcolsep}}{{4pt}}\n"
+           f"\\resizebox{{\\columnwidth}}{{!}}{{%\n"
            f"\\begin{{tabular}}{{llrrr}}\n\\toprule\n"
-           f"Scheme & Client & Samples (run) & GPU (\\(\\times\\) honest) & Cost / honest \\\\\n\\midrule\n"
+           f"Scheme & Client & Samples & GPU\\,/\\,honest & Samples\\,/\\,honest \\\\\n\\midrule\n"
            f"{body}"
-           f"\\bottomrule\n\\end{{tabular}}\n\\end{{table}}\n")
+           f"\\bottomrule\n\\end{{tabular}}}}\n\\end{{table}}\n")
     return dat, tex
 
 def emit_attackcompare(fig, runs, out, tail):
@@ -466,12 +521,13 @@ def emit_attackcompare(fig, runs, out, tail):
                  f"\\addplot[name path={k}hi,draw=none,forget plot] table[x=round,y={k}_hi]{{{dat}}};\n"
                  f"\\addplot[{col}!12,forget plot] fill between[of={k}lo and {k}hi];\n"
                  f"\\addplot[{col},mark={mk},mark size=1pt] table[x=round,y={k}]{{{dat}}};\\addlegendentry{{{label}}}\n")
-    eta = ""
-    if et is not None: eta += f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
-    if el is not None: eta += f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
+    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+    # if et is not None: eta += f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
+    # if el is not None: eta += f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
     # legend INSIDE the axes (top strip, 2 cols) so it never overflows the column,
     # matching the timelines/fig4. Data plateaus <= ~0.5 so the upper half is free.
-    tex = (fig_open(fig, "xlabel={communication round},ylabel={watermark BER},ymin=0,ymax=1,"
+    ymax = fig.get("ymax", 0.6)   # zoom the BER axis; attack panels set ymax=0.8 so the caught baselines stay in frame
+    tex = (fig_open(fig, f"xlabel={{communication round}},ylabel={{watermark BER}},ymin=0,ymax={ymax},"
                     "legend pos=north east,legend columns=2,"
                     "legend style={/tikz/every even column/.append style={column sep=6pt}}")
            + body + eta + fig_close(fig))
@@ -497,7 +553,7 @@ def emit_classbars(fig, runs, out, tail):
     fdat = f"{fig['name']}_fr.dat"
     write_dat(os.path.join(out, "data", fdat), ["class","fr_ber","fr_sd"], frows)
     fr_plot = (f"\\addplot[cfr,fill=cfr!55,draw=cfr,error bars/.cd,y dir=both,y explicit] "
-               f"table[x=class,y=fr_ber,y error=fr_sd]{{{fdat}}};\\addlegendentry{{free-rider (ours)}}\n"
+               f"table[x=class,y=fr_ber,y error=fr_sd]{{{fdat}}};\\addlegendentry{{free-rider}}\n"
                if frows else "")
     tex = (fig_open(fig, "ybar,bar width=5pt,xlabel={trigger class},ylabel={watermark BER},"
                     "xtick=data,ymin=0,enlarge x limits=0.08,legend pos=north west") +
@@ -561,16 +617,16 @@ def emit_layers(fig, runs, out, tail):
     write_dat(os.path.join(out, "data", dat), ["nl","fr","fr_sd","hon","hon_sd"], rows)
     et, el = fig.get("eta_t"), fig.get("eta_l")
     nlmin, nlmax = rows[0][0], rows[-1][0]
-    eta = ""
-    if et is not None:
-        eta += (f"\\addplot[cprev,dashed,forget plot] coordinates {{({nlmin},{et}) ({nlmax},{et})}};\n"
-                f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{nlmax},{et}) {{$\\eta_t$}};\n")
-    if el is not None:
-        eta += f"\\addplot[chonest,densely dashed,forget plot] coordinates {{({nlmin},{el}) ({nlmax},{el})}};\n"
+    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+    # if et is not None:
+    #     eta += (f"\\addplot[cprev,dashed,forget plot] coordinates {{({nlmin},{et}) ({nlmax},{et})}};\n"
+    #             f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{nlmax},{et}) {{$\\eta_t$}};\n")
+    # if el is not None:
+    #     eta += f"\\addplot[chonest,densely dashed,forget plot] coordinates {{({nlmin},{el}) ({nlmax},{el})}};\n"
     tex = (fig_open(fig, "xlabel={number of watermarked layers $N$},ylabel={final watermark BER},"
                     "xtick=data,ymin=0,legend pos=north west,unbounded coords=discard") +
            f"\\addplot[cfr,mark=*,error bars/.cd,y dir=both,y explicit] "
-           f"table[x=nl,y=fr,y error=fr_sd]{{{dat}}};\\addlegendentry{{free-rider (ours)}}\n"
+           f"table[x=nl,y=fr,y error=fr_sd]{{{dat}}};\\addlegendentry{{free-rider}}\n"
            f"\\addplot[chonest,mark=square*,error bars/.cd,y dir=both,y explicit] "
            f"table[x=nl,y=hon,y error=hon_sd]{{{dat}}};\\addlegendentry{{honest}}\n"
            f"{eta}" + fig_close(fig))
@@ -667,9 +723,10 @@ def emit_overlap(fig, runs, out, tail):
     write_dat(os.path.join(out, "data", fdat), ["class","ber"], frrows)
     cmin = min(r[0] for r in hrows); cmax = max(r[0] for r in hrows)
     et = fig.get("eta_t")
-    eta = (f"\\addplot[cprev,dashed,forget plot] coordinates {{({cmin},{et}) ({cmax},{et})}};\n"
-           f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{cmax},{et}) {{$\\eta_t$}};\n"
-           if et is not None else "")
+    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+    # eta = (f"\\addplot[cprev,dashed,forget plot] coordinates {{({cmin},{et}) ({cmax},{et})}};\n"
+    #        f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{cmax},{et}) {{$\\eta_t$}};\n"
+    #        if et is not None else "")
     tex = (fig_open(fig, "xlabel={trigger class},ylabel={watermark BER},ymin=0,xtick=data") +
            f"\\addplot[name path=lo,draw=none,forget plot] table[x=class,y=lo]{{{hdat}}};\n"
            f"\\addplot[name path=hi,draw=none,forget plot] table[x=class,y=hi]{{{hdat}}};\n"
@@ -750,6 +807,7 @@ PREAMBLE = r"""% --- paste into your main.tex preamble (once) ---
 \usepgfplotslibrary{fillbetween}     % for the +-std / honest bands
 \usepackage{multirow}                % for the cost table (tab1)
 \usepackage{booktabs}                % \toprule \midrule \bottomrule
+\usepackage{graphicx}                % for \resizebox around tab1 (usually already loaded by pgfplots)
 \pgfplotsset{compat=1.17}
 % pgfplots resolves table{...} relative to MAIN.tex; point it at the data folder:
 \pgfplotsset{table/search path={plots/export/data}}   % <-- set to where your .dat live

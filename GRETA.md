@@ -684,6 +684,18 @@ implement the fedipr - last layer watermark
 
 watermark loss or total loss - difficult class meaning -> send c explanation table
 
+September 16
+- plotting fixes
+- food-101
+- cifar100 done (missing easy class runs for faremark -> plot and add to overleaf)
+- figure out what to do with the flat and info less white box BER line
+
+
+- get food commands, run them
+- get cifar 1,7 when done, plot all cifar and add to overleaf - txt slack
+
+
+
 #### September 2
 NOTES:
 - fedipr:

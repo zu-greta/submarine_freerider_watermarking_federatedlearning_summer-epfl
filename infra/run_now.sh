@@ -562,6 +562,7 @@ if has FD; then
   echo " Group FD -- Food-101 basics (1 seed, config 15 / resnet50)"
   CIDX=15
   SEED_FD="${SEED_FD:-0}"
+  export FAST_DATA=1 DETERMINISM=0
   gb="PARTITION=iid ROUNDS=50 FAST_DATA=1 AUTOP_COMMON_PER_CLASS=5 \
       AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 FREE_RIDER_IDS=3,6 \
       TAP_SCOPE=head2 TAP_COAST_MODE=decay"

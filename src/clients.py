@@ -1388,11 +1388,18 @@ def make_graftblock_attack(base_cls):
                 submit, n = super().produce_update(global_state, prev_global_state, round_idx)
                 self.trace.append({"round": round_idx, "action": phase, "eta_frozen": None})
                 return submit, n
-            # free-ride: reduced shard + scope-limited training (+ optional graft -- ignore)
-            self._prepare(max(0, self.common_per_class),
-                          n_common_classes=self.n_common_classes,
-                          trigger_train_n=self.trigger_train_n)
-            self.loader = self._reduced_loader
+            # free-ride: scope-limited training (+ optional graft -- ignore)
+            if self.common_per_class < 0:
+                # FULL SHARD (cpc=-1)
+                self.loader = self._orig_loader
+                reduced_n = self.num_samples
+            else:
+                # REDUCED SHARD: trigger/sign + cpc common-class images per class.
+                self._prepare(max(0, self.common_per_class),
+                              n_common_classes=self.n_common_classes,
+                              trigger_train_n=self.trigger_train_n)
+                self.loader = self._reduced_loader
+                reduced_n = getattr(self, "_reduced_n", self.num_samples)
             self._freeze_scope()                       # only the last layers move
             try:
                 submit, n = super().produce_update(global_state, prev_global_state, round_idx)
@@ -1407,8 +1414,9 @@ def make_graftblock_attack(base_cls):
                         grafted[k] = submit[k].clone()
                 submit = grafted
             self.trace.append({"round": round_idx, "action": "tap", "eta_frozen": None,
-                               "reduced_n": getattr(self, "_reduced_n", self.num_samples),
+                               "reduced_n": reduced_n,
                                "common_per_class": self.common_per_class,
+                               "full_shard": self.common_per_class < 0,
                                "scope": self.scope, "graft": self.graft,
                                "n_trigger_train": getattr(self, "_trigger_train_n", None),
                                "n_common_classes": self.n_common_classes})

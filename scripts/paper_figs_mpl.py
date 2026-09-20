@@ -155,21 +155,17 @@ def fig_timeline(spec, runs, out, tail):
         print(f"  skip {spec['name']} (no history)"); return
     fm = [_ms(frR.get(rd, [])) for rd in rounds]; bm = [_ms(benR.get(rd, [])) for rd in rounds]
     fig, ax = plt.subplots(figsize=(6.2, 3.4))
-    tstart = max(1, rounds[-1] - tail + 1)
-    ax.axvspan(tstart, rounds[-1], color="#DDDDDD", alpha=0.4, linewidth=0)
+    # free-rider drawn FIRST (underneath), honest band+line LAST (on top) so honest is never
+    # hidden behind the FR fill -- matches the Overleaf timeline. Grey tail-highlight removed.
+    _band(ax, rounds, [m for m, s in fm], [s for m, s in fm], C_FR, "free-rider", marker="o")
     _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
-    _band(ax, rounds, [m for m, s in fm], [s for m, s in fm], C_FR, "free-rider (ours)", marker="o")
-    # -- threshold lines disabled for now (commented out) --
-    # if spec.get("eta_t") is not None:
-    #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
-    #     ax.text(rounds[0], spec["eta_t"], r" $\eta_t$", va="bottom", fontsize=10)
-    # if spec.get("eta_l") is not None:
-    #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
-    #     ax.text(rounds[0], spec["eta_l"], r" $\eta_\ell$", va="bottom", fontsize=10)
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
-    ax.set_ylim(bottom=0); ax.grid(axis="x", visible=False)
+    ax.set_ylim(0, spec.get("ymax", 0.6)); ax.grid(axis="x", visible=False)   # zoom BER axis (matches overleaf)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-    ax.legend(fontsize=10, loc="upper right"); ax.set_title(spec.get("title", ""), fontsize=11)
+    h, l = ax.get_legend_handles_labels()
+    order = sorted(range(len(l)), key=lambda i: 0 if "honest" in l[i] else 1)   # honest floor listed first
+    ax.legend([h[i] for i in order], [l[i] for i in order], fontsize=10, loc="upper right")
+    ax.set_title(spec.get("title", ""), fontsize=11)
     return _save(fig, out, spec["name"])
 
 # ============================================================================
@@ -206,7 +202,7 @@ def fig_attack(spec, runs, out, tail):
     # if spec.get("eta_l") is not None:
     #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
-    ax.set_ylim(0, 1); ax.grid(axis="x", visible=False)
+    ax.set_ylim(0, spec.get("ymax", 0.8)); ax.grid(axis="x", visible=False)   # zoom BER axis (matches overleaf; baselines ~0.5-0.75 stay in frame)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     ax.legend(fontsize=9, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
     return _save(fig, out, spec["name"])
@@ -235,7 +231,7 @@ def fig_classdiff(spec, runs, out, tail):
     axL.bar(fx, [fb[c][0] for c in classes if fb[c][0] == fb[c][0]], width=w,
             yerr=[fb[c][1] for c in classes if fb[c][0] == fb[c][0]], capsize=2.5,
             color=C_FR, edgecolor="#8a3d00", linewidth=0.8,
-            error_kw=dict(ecolor="#5f2a00", elinewidth=0.9), label="free-rider (ours)", zorder=3)
+            error_kw=dict(ecolor="#5f2a00", elinewidth=0.9), label="free-rider", zorder=3)
     axL.set_xticks(xs); axL.set_xticklabels([str(c) for c in classes])
     axL.set_xlabel("trigger class"); axL.set_ylabel("watermark BER"); axL.set_ylim(bottom=0)
     axL.grid(axis="x", visible=False); axL.legend(fontsize=10, loc="upper right")
@@ -332,7 +328,8 @@ def tab_costs(spec, runs, out, tail):
     header = ["scheme", "client", "samples", "samples_sd", "gpu_s", "gpu_s_sd", "cost_over_honest"]
     csv_rows, tbl_rows, any_ok = [], [], False
     for label, fam in spec["rows"]:
-        rr = runs.get(fam, [])
+        fams = fam if isinstance(fam, (list, tuple)) else [fam]   # a list pools+averages its seeds (e.g. FareMark easy+hard)
+        rr = [r for f in fams for r in runs.get(f, [])]
         if not rr:
             continue
         any_ok = True
@@ -352,7 +349,7 @@ def tab_costs(spec, runs, out, tail):
     # rendered PNG table
     fig, ax = plt.subplots(figsize=(7.2, 0.5 + 0.4*len(tbl_rows)))
     ax.axis("off")
-    col = ["Scheme", "Client", "Samples (run)", "GPU-time (s)", "Cost / honest"]
+    col = ["Scheme", "Client", "Samples", "GPU-time (s)", "Samples / honest"]  # last col = fr/honest sample ratio
     t = ax.table(cellText=tbl_rows, colLabels=col, loc="center", cellLoc="center")
     t.auto_set_font_size(False); t.set_fontsize(10); t.scale(1, 1.4)
     for (r_i, c_i), cell in t.get_celld().items():
@@ -364,27 +361,33 @@ def tab_costs(spec, runs, out, tail):
 # ============================================================================
 # figure registry -- families kept in lock-step with to_pgfplots.py
 # ============================================================================
+# NOTE: kept in lock-step with to_pgfplots.py 
 FIGS = [
-    dict(name="fig1_faremark_timeline", kind="timeline", fr="L1_graftblock_head2_c36",
-         eta_t=0.064, eta_l=0.264, title="FareMark: honest vs free-rider"),
-    dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
-         eta_t=0.20, eta_l=0.50, title="FedIPR backdoor: honest vs free-rider"),
+    # ---- FareMark (box-free) -- HEAD-only free-rider ----
+    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
+         eta_t=0.064, eta_l=0.264, title="FareMark (head, hard 3,6): honest vs free-rider"),
+    dict(name="fig1_faremark_timeline_head_c17", kind="timeline", fr="L7_graftblock_head_c17",
+         eta_t=0.064, eta_l=0.264, title="FareMark (head, easy 1,7): honest vs free-rider"),
+    # ---- FedIPR white-box sign -- HEAD2 free-rider ----
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
-         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (L=1): honest vs free-rider"),
+         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head2): honest vs free-rider"),
+    # ---- ONE merged cost table (FareMark head avg L6+L7, sign head2 G_L1) ----
     dict(name="tab1_costs", kind="costtable",
-         rows=[("FareMark", "L1_graftblock_head2_c36"),
-               ("FedIPR", "F_L1_graftblock_head2_c36_fi"),
-               ("FedIPR-sign", "G_L1_graftblock_head2_c36_ws")]),
-    dict(name="fig2_attack_compare", kind="attack", honest="A1_honest_c100",
+         rows=[("FareMark (head)", ["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
+               ("FedIPR-sign (head2)", ["G_L1_graftblock_head2_c36_ws"])]),
+    # ---- attack comparisons ----
+    dict(name="fig2_attack_compare_head", kind="attack", honest="A1_honest_c100", ymax=0.8,
          attacks=[("previous models", "H5_prevmodel_c100"), ("gaussian", "H6_gaussian_c100"),
-                  ("ours (head2)", "L1_graftblock_head2_c36")],
-         eta_t=0.064, eta_l=0.264, title="FareMark: attack comparison"),
-    dict(name="fig2_sign_attack_compare", kind="attack", honest="G_A1_honest_c100_ws",
+                  ("ours (head)", "L6_graftblock_head_c36")],
+         eta_t=0.064, eta_l=0.264, title="FareMark (head): attack comparison"),
+    dict(name="fig2_sign_attack_compare", kind="attack", honest="G_A1_honest_c100_ws", ymax=0.8,
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"), ("gaussian", "G_H6_gaussian_c100_ws"),
                   ("ours (head2)", "G_L1_graftblock_head2_c36_ws")],
-         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign: attack comparison"),
+         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head2): attack comparison"),
+    # ---- FareMark class difficulty (combined bars + entropy scatter twin), head families ----
     dict(name="fig3_class_difficulty", kind="classdiff",
-         honest="A1_honest_c100", fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17"]),
+         honest="A1_honest_c100", fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
+    # ---- white-box layer sweeps: detection (fig4a) + cost (fig4b) + full-data cost (fig4c) ----
     dict(name="fig4a_detection_layers", kind="layers",
          honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
          layers=[1, 6, 20], eta_t=0.20, eta_l=0.50,
@@ -392,28 +395,9 @@ FIGS = [
     dict(name="fig4b_cost_layers", kind="costlayers",
          fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
          title="White-box: adaptive free-rider pays honest cost as the mark deepens"),
-
-    # ---- HEAD figures (fc only, last 2 tensors) ----
-    dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
-         eta_t=0.064, eta_l=0.264, title="FareMark (head-only): honest vs free-rider"),
-    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
-         eta_t=0.20, eta_l=0.50, title="FedIPR backdoor (head-only): honest vs free-rider"),
-    dict(name="fig1_sign_timeline_head", kind="timeline", fr="G_L6_graftblock_head_c36_ws",
-         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head-only): honest vs free-rider"),
-    dict(name="tab1_costs_head", kind="costtable",
-         rows=[("FareMark", "L6_graftblock_head_c36"),
-               ("FedIPR", "F_L6_graftblock_head_c36_fi"),
-               ("FedIPR-sign", "G_L6_graftblock_head_c36_ws")]),
-    dict(name="fig2_attack_compare_head", kind="attack", honest="A1_honest_c100",
-         attacks=[("previous models", "H5_prevmodel_c100"), ("gaussian", "H6_gaussian_c100"),
-                  ("ours (head)", "L6_graftblock_head_c36")],
-         eta_t=0.064, eta_l=0.264, title="FareMark (head-only): attack comparison"),
-    dict(name="fig2_sign_attack_compare_head", kind="attack", honest="G_A1_honest_c100_ws",
-         attacks=[("previous models", "G_H5_prevmodel_c100_ws"), ("gaussian", "G_H6_gaussian_c100_ws"),
-                  ("ours (head)", "G_L6_graftblock_head_c36_ws")],
-         eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head-only): attack comparison"),
-    dict(name="fig3_class_difficulty_head", kind="classdiff",
-         honest="A1_honest_c100", fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
+    dict(name="fig4c_cost_layers_full", kind="costlayers",
+         fr_fmt="G_Ladaptfull_c36_ws_L{nl}", layers=[1, 6, 20],   # cpc=-1 full-data variant of fig4b
+         title="White-box: adaptive free-rider, full data (cpc=-1)"),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
         "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs}
@@ -437,7 +421,10 @@ def _spec_families(spec):
     if k == "costlayers":
         return [spec["fr_fmt"].format(nl=nl) for nl in spec["layers"]]
     if k == "costtable":
-        return [fam for _, fam in spec["rows"]]
+        out = []
+        for _, fam in spec["rows"]:
+            out += (list(fam) if isinstance(fam, (list, tuple)) else [fam])
+        return out
     return []
 
 
