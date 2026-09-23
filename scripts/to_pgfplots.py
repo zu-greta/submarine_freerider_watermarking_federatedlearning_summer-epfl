@@ -44,7 +44,7 @@ FIGURES = [
          caption="FareMark (CIFAR-100): honest clients vs.\\ our HEAD-ONLY free-rider "
                  "(softmax fc only), \\emph{easy} classes 1,7 -- companion to the hard-class panel. "
                  "Bands are $\\pm 1$ s.d.",
-         takeaway="same as beofre but on the easy classes 1,7 to show the BER of a FR can be below the honset even"),
+         takeaway="same as before but on the easy classes 1,7 to show the BER of a FR can be below the honest even"),
 
     # ==========================================================================
     # FedIPR white-box sign -- HEAD2 free-rider only (carrier lives in head2).
@@ -52,11 +52,12 @@ FIGURES = [
     # ==========================================================================
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
          eta_t=0.20, eta_l=0.50,
+         hon_emphasis=True, fr_mark=0.6, hon_label="honest",   # blue drawn ABOVE orange where both ~0
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds, 1 output layer): watermark BER "
                  "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d.",
          takeaway="(white box fedipr style, resnet18, cifar100. use this for output layer white box scheme)"
                   "same story as faremark timeline, 0.5 BER is random and 0 is best. FR and honest match to avoid detection."
-                  "white box version has much lower BER in general since sign watermark encodes each bit as the sign of a chosen weight + no sampling noise or softmax projection and class difficulty"),
+                  "white box version has much lower BER in general since sign watermark encodes each bit as the sign of a chosen weight + no sampling noise or softmax projection and class difficulty. \\jg{does someone know how to modify the figure such that the blue line is ABOVE the orange, please? } \\gz{i made the orange dots smaller idk if this is a bit better?}"),
 
     # ---- tab1: ONE combined cost table -- FareMark (head) + white-box sign (head2) ----
     dict(name="tab1_costs", kind="costtable",
@@ -68,7 +69,7 @@ FIGURES = [
                  "easy (1,7) and hard (3,6) free-riders, since the free-rider's cost is "
                  "class-independent (same scope, same reduced shard).",
          takeaway="The free-rider matches the honest watermark BER while spending only "
-                  "$\\approx\\!0.28\\times$ the honest client's samples and GPU time -- evasion is cheap."),
+                  "$\\approx\\!0.3\\times$ the honest client's samples and GPU time -- evasion is cheap."),
 
     # ---- fig2: attack comparison (previous-models / gaussian / ours) ----
     dict(name="fig2_attack_compare_head", kind="attackcompare", honest="A1_honest_c100", ymax=0.8,
@@ -78,8 +79,9 @@ FIGURES = [
          eta_t=0.064, eta_l=0.264,
          caption="FareMark (CIFAR-100): free-rider BER vs.\\ round for the two baselines and our "
                  "HEAD-ONLY attack (softmax fc only). Bands are $\\pm 1$ s.d.",
-         takeaway="(good plot) last layer only FR compared to the easy FR attacks from paper"),
+         takeaway="(good plot) last layer only FR compared to the easy FR attacks from paper \\jg{if we reduce the name \"previous models\" we can have the legend in one line}"),
     dict(name="fig2_sign_attack_compare", kind="attackcompare", honest="G_A1_honest_c100_ws", ymax=0.8,
+         hon_on_top=True,   # honest floor coincides with ours (~0); draw it opaque, above the attack bands
          attacks=[("previous models", "G_H5_prevmodel_c100_ws"),
                   ("gaussian",        "G_H6_gaussian_c100_ws"),
                   ("ours (head2)",    "G_L1_graftblock_head2_c36_ws")],
@@ -87,7 +89,7 @@ FIGURES = [
          caption="FedIPR white-box sign (CIFAR-100, 3 seeds): free-rider BER vs.\\ round for the "
                  "two baseline attacks (previous-models, Gaussian) and ours. Bands are $\\pm 1$ s.d.",
          takeaway="(use this version for white box schemes) Same picture for the white-box sign mark: the baselines are caught at chance, "
-                  "our head2 free-rider evades at the honest floor."),
+                  "our head2 free-rider evades at the honest floor. (the honest and our free-rider overlap) \\jg{same comment}"),
 
     # ---- fig3: FareMark class difficulty -- (a) per-class BER bars (head), (b) entropy ----
     dict(name="fig3a_class_ber_head", kind="classbars",
@@ -101,39 +103,26 @@ FIGURES = [
                  "Lower-entropy (more peaked, harder-to-embed) classes carry the higher BER floor.",
          takeaway="Harder, lower-entropy trigger classes carry a higher honest BER floor"),
 
-    # ---- fig4a: DETECTION -- FIXED head2 free-rider, final BER vs #watermarked layers ----
-    #   Claim A: hold the attacker at its cheap head2 scope; as the mark spreads past head2
-    #   the free-rider cannot maintain the deep bits -> BER rises above eta -> caught.
-    dict(name="fig4a_detection_layers", kind="layers",
-         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
-         layers=[1, 6, 20], eta_t=0.20, eta_l=0.50,
-         caption="FedIPR white-box sign (CIFAR-100): final watermark BER vs.\\ the number of "
-                 "layers the server embeds the sign into, for honest clients and a \\emph{fixed} "
-                 "head2 free-rider (does not adapt its scope). At one output layer the free-rider "
-                 "re-embeds and evades; embedding deeper into the model layers pushes its BER up. "
-                 "Error bars are $\\pm 1$ s.d.\\ over seeds.",
-         takeaway="(fedipr white box - showing possible solution by embedding into more layers. this version forces honest to embed deeper but FR still does head2 work and gets caught)"),
-
-    # ---- fig4b: COST -- ADAPTIVE free-rider cost vs #watermarked layers ----
-    dict(name="fig4b_cost_layers", kind="costlayers",
-         fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
-         caption="FedIPR white-box sign watermark (CIFAR-100): an adaptive free-rider "
-                 "widens the scope it retrains to cover the sign wherever it is embedded, so its "
-                 "watermark BER stays near zero and it always evades. But its compute, as a "
-                 "fraction of an honest client's, climbs towards $1.0$ (honest) once the mark spans "
-                 "the full depth. Error bars are $\\pm 1$ s.d.\\ over seeds.",
-         takeaway="fedipr white box - same as above but the FR also emebds more layers to match the hoenst, and cost goes up to more than 50 percent"),
-
-    # ---- fig4c: COST -- ADAPTIVE free-rider on the FULL common-class data (cpc=-1) ----
-    #   same as fig4b but the adaptive FR trains on the full data budget (G_Ladaptfull_*).
-    dict(name="fig4c_cost_layers_full", kind="costlayers",
-         fr_fmt="G_Ladaptfull_c36_ws_L{nl}", layers=[1, 6, 20],   # cpc=-1 (full common-class data) variant of fig4b
-         caption="FedIPR white-box sign watermark (CIFAR-100): the adaptive free-rider of "
-                 "Fig.~\\ref{fig:fig4b_cost_layers} re-run with the FULL common-class data budget "
-                 "(cpc$=-1$) instead of the reduced cpc$=5$ shard, vs.\\ the number of watermarked "
-                 "layers $N$. Same two series: free-rider compute (fraction of an honest client) and "
-                 "free-rider watermark BER. Error bars are $\\pm 1$ s.d.\\ over seeds.",
-         takeaway="(cpc=-1 full-data variant of fig4b -- EDIT ME) compare against fig4b to see how the data budget shifts the FR compute and BER."),
+    # ---- fig4: MERGED detection + cost on ONE panel vs #watermarked layers ----
+    #   fixed head2 FR BER (climbs -> caught) + adaptive FR BER (~0, evades) + adaptive FR compute
+    #   (climbs -> honest). Replaces the old separate fig4a (detection) and fig4b (cost).
+    # ---- fig4: MERGED detection + cost + full-data cost (was fig4a/fig4b/fig4c) on ONE panel ----
+    dict(name="fig4_detect_cost", kind="costdetect",
+         fixed_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",   # FIXED head2 free-rider (detection)
+         adapt_fmt="G_Ladapt_c36_ws_L{nl}",                # ADAPTIVE free-rider, reduced shard (cpc=5)
+         full_fmt="G_Lfull_c36_ws_L{nl}",                  # ADAPTIVE free-rider, full data (cpc=-1; old fig4c)
+         layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
+         caption="FedIPR white-box sign (CIFAR-100) vs.\\ the number of layers $N$ the server embeds "
+                 "the sign into. A \\emph{fixed-scope} free-rider that only ever retrains head2 (black) "
+                 "loses the deeper bits as $N$ grows, so its watermark BER climbs and it is caught. An "
+                 "\\emph{adaptive} free-rider that widens its retrained scope to cover the mark (orange) "
+                 "keeps its watermark BER $\\approx 0$ on either data budget and always evades --- but "
+                 "pays for it in compute: as a fraction of an honest client's cost it climbs with $N$, "
+                 "reaching $\\approx\\!0.53$ on a reduced shard (green) and $\\approx\\!1.0$, the full "
+                 "honest cost, on the full data budget (purple). Error bars are $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="the defender's dilemma --- a cheap fixed free-rider is caught by embedding deeper, "
+                  "while a free-rider that stays hidden must widen its scope until, at full depth on full "
+                  "data, it costs as much as an honest client."),
 ]
 
 # ============================================================================
@@ -142,50 +131,82 @@ FIGURES = [
 # ============================================================================
 APPENDIX_FIGURES = [
     # ---- FedIPR BACKDOOR (black-box) timelines -- MOVED here from the main paper set ----
-    dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
-                 "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d.",
-         takeaway="The black-box backdoor scheme behaves like FareMark: the head2 free-rider "
-                  "re-embeds the trigger set and evades at the honest floor."),
-    dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
-         eta_t=0.20, eta_l=0.50,
-         caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
-                 "Bands are $\\pm 1$ s.d.",
-         takeaway="Even fc-only, the backdoor free-rider re-memorises the trigger set and evades."),
+    # dict(name="fig1_fedipr_timeline", kind="timeline", fr="F_L1_graftblock_head2_c36_fi",
+    #      eta_t=0.20, eta_l=0.50,
+    #      caption="FedIPR backdoor (CIFAR-100, 3 seeds): watermark BER (=$1-$trigger accuracy) "
+    #              "vs.\\ round for honest clients and our head2 free-rider. Bands are $\\pm 1$ s.d.",
+    #      takeaway="The black-box backdoor scheme behaves like FareMark: the head2 free-rider "
+    #               "re-embeds the trigger set and evades at the honest floor."),
+    # dict(name="fig1_fedipr_timeline_head", kind="timeline", fr="F_L6_graftblock_head_c36_fi",
+    #      eta_t=0.20, eta_l=0.50,
+    #      caption="FedIPR backdoor (CIFAR-100): honest vs.\\ our HEAD-ONLY free-rider (fc only). "
+    #              "Bands are $\\pm 1$ s.d.",
+    #      takeaway="Even fc-only, the backdoor free-rider re-memorises the trigger set and evades."),
 
-    dict(name="app_faremark_overlap", kind="overlap", honest="A1_honest_c100",
-         fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
-             "K9_alldyn_head2_c36", "K9_alldyn_head2_c17"], eta_t=0.064, eta_l=0.264,
-         caption="Honest per-class BER band vs.\\ free-rider operating points (FareMark). "
-                 "Free-riders land inside the band; no single threshold separates them.",
-         takeaway="Every free-rider operating point falls inside the honest band, so no single "
-                  "BER threshold separates honest from free-rider."),
-    dict(name="app_faremark_class_band", kind="band", family="A1_honest_c100",
-         caption="Per-trigger-class honest watermark BER (FareMark, CIFAR-100).",
-         takeaway="The honest BER floor varies widely across classes, giving the free-rider a wide "
-                  "band to hide in."),
-    dict(name="app_faremark_savings", kind="savings",
-         fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
-             "K9_alldyn_head2_c36", "K4_alldyn_block2_c36"],
-         caption="Free-rider cost as a fraction of an honest client (samples and GPU-time).",
-         takeaway="Across scopes the free-rider costs only a small fraction of an honest client."),
-    dict(name="app_fedipr_overlap", kind="overlap", honest="F_A1_honest_c100_fi",
-         fr=["F_L1_graftblock_head2_c36_fi", "F_L5_graftblock_head2_c17_fi",
-             "F_K9_alldyn_head2_c36_fi", "F_K9_alldyn_head2_c17_fi"], eta_t=0.20, eta_l=0.50,
-         caption="Honest band vs.\\ free-rider points (FedIPR backdoor).",
-         takeaway="Backdoor free-rider points sit inside the honest band -- same non-separability as FareMark."),
-    dict(name="app_fedipr_sign_overlap", kind="overlap", honest="G_A1_honest_c100_ws",
-         fr=["G_L1_graftblock_head2_c36_ws", "G_L5_graftblock_head2_c17_ws",
-             "G_K9_alldyn_head2_c36_ws", "G_K9_alldyn_head2_c17_ws"], eta_t=0.20, eta_l=0.50,
-         caption="Honest band vs.\\ free-rider points (FedIPR white-box sign, 1 layer).",
-         takeaway="At one carrier layer the sign free-rider points sit inside the honest band too."),
-    dict(name="app_niid_timeline_c36", kind="timeline", fr="E2_reduced_niid_c36",
-         eta_t=0.161, eta_l=0.576,
-         caption="Non-IID (Dirichlet $\\alpha{=}0.5$): honest vs.\\ reduced free-rider BER.",
-         takeaway="The evasion persists under non-IID data."),
-    # TODO(appendix): other datasets (food101 -> point --res at results/food101), other models,
-    #   submarine tap views, alpha sweep, distribution-aware assignment (EA), accuracy panels.
+    # dict(name="app_faremark_overlap", kind="overlap", honest="A1_honest_c100",
+    #      fr=["L1_graftblock_head2_c36", "L5_graftblock_head2_c17",
+    #          "K9_alldyn_head2_c36", "K9_alldyn_head2_c17"], eta_t=0.064, eta_l=0.264,
+    #      caption="Honest per-class BER band vs.\\ free-rider operating points (FareMark). "
+    #              "Free-riders land inside the band; no single threshold separates them.",
+    #      takeaway="Every free-rider operating point falls inside the honest band, so no single "
+    #               "BER threshold separates honest from free-rider."),
+    # ---- (1) CLASS DIFFICULTY: ranked honest per-class BER, pooled over A1 + whichever T decades
+    #   exist. x = RANK (not class id), so missing decades leave no gaps / bunching. One colour
+    #   per decade (shows the spread is within every decade, not a decade artefact); the easiest /
+    #   hardest classes are named. Caption numbers (@N@, @LO@, @HI@, @RATIO@) are filled from data.
+    dict(name="app_faremark_class_band", kind="classrank",
+         families=["A1_honest_c100",
+                   "T4_honest_c100_cls1019", "T5_honest_c100_cls2029", "T8_honest_c100_cls3039",
+                   "T1_honest_c100_cls4049", "T9_honest_c100_cls5059", "T6_honest_c100_cls6069",
+                   "T7_honest_c100_cls7079", "T10_honest_c100_cls8089", "T2_honest_c100_cls9099"],
+         n_label=3,   # name the 3 easiest + 3 hardest classes
+         caption="FareMark (CIFAR-100): converged honest watermark BER of every trigger class run so "
+                 "far (@N@ classes), sorted from easiest to hardest. Each dot is one class (mean "
+                 "$\\pm 1$ s.d.\\ over seeds, last @TAIL@ rounds); colour marks the run (class "
+                 "decade) it comes from. The honest floor ranges from @LO@ to @HI@ "
+                 "(@RATIO@$\\times$) depending only on which class is the trigger.",
+         takeaway="Class difficulty alone moves the honest BER floor by several-fold, so no single "
+                  "threshold fits every client."),
+
+    # ---- (2) NON-IID: (a) the alpha=0.5 timeline (unchanged content) + (b) converged BER vs alpha.
+    #   (b) is one compact panel: honest mean + 10-90% client band, reduced FR (3,6) +-1 s.d. seeds,
+    #   at alpha = 0.1 / 0.5 / 1.0 / IID. Missing settings are skipped.
+    dict(name="app_niid_reduced_timeline", kind="niidalpha", wide=True,
+         honest="E1_honest_niid_c100", ymax=0.6, eta_t=0.161, eta_l=0.576,
+         attacks=[("reduced FR (random assign)",       "E2_reduced_niid_c36"),
+                  ("reduced FR (distribution assign)", "EA2_reduced_niid_distrib_c36")],
+         sweep=[("0.1", "E3_honest_niid_c100_a01", "E3_reduced_niid_c36_a01"),
+                ("0.5", "E1_honest_niid_c100",     "E2_reduced_niid_c36"),
+                ("1.0", "E3_honest_niid_c100_a10", "E3_reduced_niid_c36_a10"),
+                ("IID", "A1_honest_c100",          "A3_reduced_c100_c36")],
+         caption="Non-IID CIFAR-100. \\textbf{(a)} Dirichlet $\\alpha{=}0.5$: honest floor vs.\\ our "
+                 "reduced free-rider (classes 3,6) under random (E2) and distribution-aware (EA2) "
+                 "trigger assignment; bands are $\\pm 1$ s.d.\\ over seeds. \\textbf{(b)} Converged "
+                 "BER (last @TAIL@ rounds) vs.\\ the Dirichlet concentration $\\alpha$ (smaller = more "
+                 "skewed): honest mean with the 10--90\\,\\% band over honest clients, and the reduced "
+                 "free-rider (random assignment) $\\pm 1$ s.d.\\ over seeds.",
+         takeaway="Stronger skew raises and widens the honest floor, and the reduced free-rider stays "
+                  "inside the honest band at every $\\alpha$."),
+
+    # ---- (3) SUBMARINE (IID, head2): BER timeline / when it taps / what it costs, shared x axis.
+    #   bottom panel: cumulative FR samples / honest samples -- solid = actual (taps on the reduced
+    #   cpc shard), dashed = same tap schedule if every tap used full honest data. The gap between
+    #   the two is the data-reduction saving; the gap from 1 to dashed is the coasting saving.
+    dict(name="app_submarine_timeline_k9", kind="submarine",
+         honest="A1_honest_c100", ymax=0.6, eta_t=0.064, eta_l=0.264,
+         attacks=[("easy 1,7", "K9_alldyn_head2_c17"),
+                  ("hard 3,6", "K9_alldyn_head2_c36")],
+         caption="Submarine free-rider (FareMark, CIFAR-100, IID, head2 scope), 3 seeds. "
+                 "\\textbf{Top:} watermark BER vs.\\ round, honest floor vs.\\ the submarine at easy "
+                 "(1,7) and hard (3,6) classes ($\\pm 1$ s.d.). \\textbf{Middle:} what the free-riders "
+                 "do each round (majority over free-riders $\\times$ seeds): honest warm-up, "
+                 "\\emph{tap} (retrain on the reduced shard) or \\emph{coast} (no training). "
+                 "\\textbf{Bottom:} cumulative training samples relative to an honest client; solid = "
+                 "actual, dashed = the same tap schedule if every tap used full data.",
+         takeaway="The submarine only taps when its BER drifts up, stays on the honest floor, and "
+                  "ends at @COST@ of the honest cost (@COSTFULL@ if taps used full data)."),
+    # TODO(appendix): other datasets (food101 -> run with --dataset food101 on its own results dir),
+    #   other models, alpha sweep, accuracy panels.
 ]
 
 # ----------------------------------------------------------------------------
@@ -195,7 +216,11 @@ COLORDEF = (r"\definecolor{chonest}{HTML}{0072B2}"  "\n"
             r"\definecolor{cfr}{HTML}{D55E00}"      "\n"
             r"\definecolor{cacc}{HTML}{009E73}"     "\n"
             r"\definecolor{cprev}{HTML}{000000}"    "\n"
-            r"\definecolor{ctail}{HTML}{DDDDDD}"    "\n")
+            r"\definecolor{cfull}{HTML}{CC79A7}"    "\n"
+            r"\definecolor{ctail}{HTML}{DDDDDD}"    "\n"
+            r"\definecolor{cyel}{HTML}{E69F00}"     "\n"
+            r"\definecolor{csky}{HTML}{56B4E9}"     "\n"
+            r"\definecolor{cgrey}{HTML}{999999}"    "\n")
 AXBASE = ("width=\\linewidth,height=4.2cm,cycle list={{chonest},{cfr},{black}},"
           "every axis plot/.append style={line width=1pt},"
           "legend style={font=\\scriptsize,draw=none,fill=white},"
@@ -331,9 +356,11 @@ TITLES = {
     "fig2_sign_attack_compare":      "FedIPR white-box style (head2): attack comparison",
     "fig3a_class_ber":               "FareMark style (head2): per-class watermark BER",
     "fig3b_class_entropy":           "FareMark style (head2): BER floor vs.\\ entropy",
-    "fig4a_detection_layers":        "FedIPR white-box style: deeper embedding catches the fixed free-rider",
-    "fig4b_cost_layers":             "FedIPR white-box style: adaptive free-rider pays honest cost",
-    "fig4c_cost_layers_full":        "FedIPR white-box style: adaptive free-rider, full data (cpc=-1)",
+    # fig4_detect_cost: intentionally NO on-plot title (legend carries the meaning) -- matches Overleaf
+    # appendix
+    "app_faremark_class_band":       "FareMark: honest BER floor per trigger class (ranked)",
+    "app_niid_reduced_timeline":     "Non-IID (Dirichlet $\\alpha{=}0.5$): reduced free-rider under both trigger assignments",
+    "app_submarine_timeline_k9":     "Submarine (head2, IID): honest floor vs.\\ tapping free-rider (1,7 and 3,6)",
     # head-only twins
     "fig1_faremark_timeline_head":   "FareMark style (head, hard 3,6): honest vs.\\ free-rider BER timeline",
     "fig1_faremark_timeline_head_c17": "FareMark style (head, easy 1,7): honest vs.\\ free-rider BER timeline",
@@ -344,10 +371,14 @@ TITLES = {
     "fig3a_class_ber_head":          "FareMark style (head): per-class BER",
 }
 
+def _env(fig):
+    """figure* for wide (two-column-spanning) multi-panel appendix figures, else figure."""
+    return "figure*" if fig.get("wide") else "figure"
+
 def fig_open(fig, axopts):
     t = TITLES.get(fig["name"])                                        # short title above the axes (Overleaf)
     title_opt = f"title={{{t}}},title style={{font=\\small,yshift=-2pt}}," if t else ""
-    return (f"\\begin{{figure}}[t]\\centering\n{COLORDEF}"
+    return (f"\\begin{{{_env(fig)}}}[t]\\centering\n{COLORDEF}"
             f"\\begin{{tikzpicture}}\n\\begin{{axis}}[{AXBASE},{title_opt}{axopts}]\n")
 
 def _cap(fig):
@@ -360,7 +391,15 @@ def _cap(fig):
 
 def fig_close(fig):
     return (f"\\end{{axis}}\n\\end{{tikzpicture}}\n"
-            f"\\caption{{{_cap(fig)}}}\\label{{fig:{fig['name']}}}\n\\end{{figure}}\n")
+            f"\\caption{{{_cap(fig)}}}\\label{{fig:{fig['name']}}}\n\\end{{{_env(fig)}}}\n")
+
+def fig_begin_multi(fig):
+    """Open a float + tikzpicture WITHOUT an axis (multi-axis figures place their own axes)."""
+    return f"\\begin{{{_env(fig)}}}[t]\\centering\n{COLORDEF}\\begin{{tikzpicture}}\n"
+
+def fig_end_multi(fig):
+    return (f"\\end{{tikzpicture}}\n"
+            f"\\caption{{{_cap(fig)}}}\\label{{fig:{fig['name']}}}\n\\end{{{_env(fig)}}}\n")
 
 # ============================================================================
 # PAPER emitters
@@ -392,6 +431,12 @@ def emit_timeline(fig, runs, out, tail):
     #     eta += (f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
     #             f"\\node[anchor=north west,font=\\scriptsize] at (axis cs:1,{el}) {{$\\eta_\\ell$}};\n")
     ymax = fig.get("ymax", 0.6)   # zoom the BER axis (default 0..0.6) so the honest/FR overlap is legible
+    frms = fig.get("fr_mark", 1.1)          # sign timeline uses smaller dots (0.6pt) so honest shows through
+    hon_label = fig.get("hon_label", "honest floor")
+    # hon_emphasis: a thick semi-transparent honest UNDERLAY beneath the thin honest line, so the
+    # blue reads ABOVE the orange where they coincide (white-box sign, both ~0). (fig1_sign_timeline)
+    hon_emph = ("\\addplot[chonest!50,line width=3pt,mark=none,forget plot] "
+                f"table[x=round,y=hon]{{{dat}}};\n") if fig.get("hon_emphasis") else ""
     # DRAW ORDER: free-rider first (underneath), honest band + mean LAST (on top) so the honest
     # band is never hidden behind the FR fill. The honest band is kept semi-transparent, so where
     # the two coincide (e.g. white-box sign, both ~0) the FR markers still show through it.
@@ -400,11 +445,12 @@ def emit_timeline(fig, runs, out, tail):
            f"\\addplot[name path=flo,draw=none,forget plot] table[x=round,y=fr_lo]{{{dat}}};\n"
            f"\\addplot[name path=fhi,draw=none,forget plot] table[x=round,y=fr_hi]{{{dat}}};\n"
            f"\\addplot[cfr!15,forget plot] fill between[of=flo and fhi];\n"
-           f"\\addplot[cfr,mark=*,mark size=1.1pt] table[x=round,y=fr]{{{dat}}};\\addlegendentry{{free-rider}}\n"
+           f"\\addplot[cfr,mark=*,mark size={frms}pt] table[x=round,y=fr]{{{dat}}};\\addlegendentry{{free-rider}}\n"
            f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
            f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
            f"\\addplot[chonest!22,forget plot] fill between[of=hlo and hhi];\n"   # on top, a touch more opaque so the band reads
-           f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{honest floor}}\n"
+           f"{hon_emph}"
+           f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{{hon_label}}}\n"
            f"{eta}" + fig_close(fig))
     return dat, tex
 
@@ -465,6 +511,23 @@ def emit_costtable(fig, runs, out, tail):
 
 def emit_attackcompare(fig, runs, out, tail):
     """fig2: honest floor + one BER-per-round line (+-std) per attack family."""
+    parts = _attackcompare_parts(fig, runs, out, tail)
+    if parts is None:
+        return None
+    dat, body = parts
+    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+    # legend BELOW the axes (2 cols) so long names never overflow the column -- matches the
+    # hand-tuned Overleaf fig2/fig4 layout.
+    ymax = fig.get("ymax", 0.6)   # zoom the BER axis; attack panels set ymax=0.8 so the caught baselines stay in frame
+    tex = (fig_open(fig, f"xlabel={{communication round}},ylabel={{watermark BER}},ymin=0,ymax={ymax},"
+                    "legend columns=2,legend style={at={(0.5,-0.32)},anchor=north,"
+                    "/tikz/every even column/.append style={column sep=6pt}}")
+           + body + eta + fig_close(fig))
+    return dat, tex
+
+def _attackcompare_parts(fig, runs, out, tail):
+    """Shared by emit_attackcompare and the non-IID panel (a): writes the .dat, returns
+    (dat, pgfplots body) or None."""
     atk = fig["attacks"]
     series = []  # (label, {round: [ber over seeds]} or None)
     hon_by_round = defaultdict(list)
@@ -510,28 +573,29 @@ def emit_attackcompare(fig, runs, out, tail):
     et, el = fig.get("eta_t"), fig.get("eta_l")
     palette = ["cprev", "cacc", "cfr", "chonest"]
     marks = ["square*", "triangle*", "*", "o"]
-    body = (f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
-            f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
-            f"\\addplot[chonest!12,forget plot] fill between[of=hlo and hhi];\n"
-            f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{honest floor}}\n")
+    # hon_on_top: draw the attack bands first, then an OPAQUE honest band + line above them, so the
+    # honest floor is visible where our free-rider coincides with it (white-box sign, both ~0).
+    hon_on_top = fig.get("hon_on_top", False)
+    hon_fill = "chonest!50" if hon_on_top else "chonest!12"
+    hon_band = (f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
+                f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
+                f"\\addplot[{hon_fill},forget plot] fill between[of=hlo and hhi];\n")
+    hon_line = f"\\addplot[chonest,mark=none] table[x=round,y=hon]{{{dat}}};\\addlegendentry{{honest floor}}\n"
+    atk_bands = ""; atk_lines = ""
     for i, (k, label, ok) in enumerate(keys):
         if not ok: continue
         col = palette[i % len(palette)]; mk = marks[i % len(marks)]
-        body += (f"\\addplot[name path={k}lo,draw=none,forget plot] table[x=round,y={k}_lo]{{{dat}}};\n"
-                 f"\\addplot[name path={k}hi,draw=none,forget plot] table[x=round,y={k}_hi]{{{dat}}};\n"
-                 f"\\addplot[{col}!12,forget plot] fill between[of={k}lo and {k}hi];\n"
-                 f"\\addplot[{col},mark={mk},mark size=1pt] table[x=round,y={k}]{{{dat}}};\\addlegendentry{{{label}}}\n")
-    eta = ""                                     # -- threshold lines disabled for now (commented out) --
+        msz = "0.6pt" if label.startswith("ours") else "1pt"   # our small dots let the honest line show through
+        atk_bands += (f"\\addplot[name path={k}lo,draw=none,forget plot] table[x=round,y={k}_lo]{{{dat}}};\n"
+                      f"\\addplot[name path={k}hi,draw=none,forget plot] table[x=round,y={k}_hi]{{{dat}}};\n"
+                      f"\\addplot[{col}!12,forget plot] fill between[of={k}lo and {k}hi];\n")
+        atk_lines += (f"\\addplot[{col},mark={mk},mark size={msz}] table[x=round,y={k}]{{{dat}}};"
+                      f"\\addlegendentry{{{label}}}\n")
+    body = (atk_bands + hon_band + hon_line + atk_lines) if hon_on_top \
+           else (hon_band + hon_line + atk_bands + atk_lines)
     # if et is not None: eta += f"\\addplot[cprev,dashed,forget plot,domain=1:{rmax}]{{{et}}};\n"
     # if el is not None: eta += f"\\addplot[chonest,densely dashed,forget plot,domain=1:{rmax}]{{{el}}};\n"
-    # legend INSIDE the axes (top strip, 2 cols) so it never overflows the column,
-    # matching the timelines/fig4. Data plateaus <= ~0.5 so the upper half is free.
-    ymax = fig.get("ymax", 0.6)   # zoom the BER axis; attack panels set ymax=0.8 so the caught baselines stay in frame
-    tex = (fig_open(fig, f"xlabel={{communication round}},ylabel={{watermark BER}},ymin=0,ymax={ymax},"
-                    "legend pos=north east,legend columns=2,"
-                    "legend style={/tikz/every even column/.append style={column sep=6pt}}")
-           + body + eta + fig_close(fig))
-    return dat, tex
+    return dat, body
 
 def emit_classbars(fig, runs, out, tail):
     """fig3a: per-class honest BER bars (all classes) + FR BER bars (its trigger classes)."""
@@ -552,13 +616,18 @@ def emit_classbars(fig, runs, out, tail):
     write_dat(os.path.join(out, "data", dat), ["class","hon_ber","hon_sd"], hrows)
     fdat = f"{fig['name']}_fr.dat"
     write_dat(os.path.join(out, "data", fdat), ["class","fr_ber","fr_sd"], frows)
-    fr_plot = (f"\\addplot[cfr,fill=cfr!55,draw=cfr,error bars/.cd,y dir=both,y explicit] "
-               f"table[x=class,y=fr_ber,y error=fr_sd]{{{fdat}}};\\addlegendentry{{free-rider}}\n"
+    fr_plot = (f"\\addplot[fill=cfr!55,draw=none,\n"
+               f"  error bars/error bar style={{cfr,line width=0.8pt}},\n"
+               f"  error bars/.cd,y dir=both,y explicit]\n"
+               f"  table[x=class,y=fr_ber,y error=fr_sd]{{{fdat}}};\\addlegendentry{{free-rider}}\n"
                if frows else "")
     tex = (fig_open(fig, "ybar,bar width=5pt,xlabel={trigger class},ylabel={watermark BER},"
-                    "xtick=data,ymin=0,enlarge x limits=0.08,legend pos=north west") +
-           f"\\addplot[chonest,fill=chonest!55,draw=chonest,error bars/.cd,y dir=both,y explicit] "
-           f"table[x=class,y=hon_ber,y error=hon_sd]{{{dat}}};\\addlegendentry{{honest}}\n"
+                    "xtick=data,ymin=0,enlarge x limits=0.08,legend pos=north west,legend cell align=left,"
+                    "legend image code/.code={\\draw[#1,draw=none] (0cm,-0.09cm) rectangle (0.26cm,0.09cm);}") +
+           f"\\addplot[fill=chonest!55,draw=none,\n"
+           f"  error bars/error bar style={{chonest,line width=0.8pt}},\n"
+           f"  error bars/.cd,y dir=both,y explicit]\n"
+           f"  table[x=class,y=hon_ber,y error=hon_sd]{{{dat}}};\\addlegendentry{{honest}}\n"
            f"{fr_plot}" + fig_close(fig))
     return dat, tex
 
@@ -580,14 +649,14 @@ def emit_classscatter(fig, runs, out, tail):
               ["class","entropy","entropy_sd","ber","ber_sd"], rows)
     # class-number label to the upper-right of each dot (so a point traces back to fig3a).
     labels = "".join(
-        f"\\node[font=\\scriptsize,anchor=west,inner sep=2pt] "
+        f"\\node[font=\\footnotesize,anchor=west,inner sep=2pt] "
         f"at (axis cs:{e:.5f},{b:.5f}) {{{c}}};\n" for (c, e, es, b, bs) in rows)
-    # CLEAN scatter (no error bars) + taller box + gridlines -> spread out, matches the
-    # matplotlib "before" look. Override AXBASE height (last key wins) so points breathe.
-    tex = (fig_open(fig, "height=6cm,xlabel={softmax entropy on trigger class},"
+    # CLEAN scatter (no error bars, black dots) + gridlines -> spread out, matches the hand-tuned
+    # Overleaf panel. Override AXBASE height (last key wins).
+    tex = (fig_open(fig, "height=4cm,xlabel={softmax entropy on trigger class},"
                     "ylabel={$\\Delta$ BER},ymin=0,ymajorgrids=true,"
                     "grid style={gray!25},enlarge x limits=0.16,enlarge y limits=0.14") +
-           f"\\addplot[only marks,cfr,mark=*,mark size=2pt] "
+           f"\\addplot[only marks,black,mark=*,mark size=2pt] "
            f"table[x=entropy,y=ber]{{{dat}}};\n"
            f"{labels}" + fig_close(fig))
     return dat, tex
@@ -673,11 +742,67 @@ def emit_costlayers(fig, runs, out, tail):
            + fig_close(fig))
     return dat, tex
 
+def emit_costdetect(fig, runs, out, tail):
+    """MERGED fig4 (detection + cost, one axis) vs #watermarked layers N. Four series in [0,1]:
+      (i)   FIXED-scope head2 free-rider watermark BER -- climbs as N grows -> CAUGHT.
+      (ii)  ADAPTIVE free-rider watermark BER -- stays ~0 (either data budget) -> EVADES.
+      (iii) ADAPTIVE free-rider compute on the REDUCED shard (effort_ratio_gpu) -- climbs with N.
+      (iv)  ADAPTIVE free-rider compute on the FULL data budget -- climbs to ~1.0 (== honest).
+    (iii)+(iv) fold in the old fig4c: same adaptive attacker, reduced vs full data."""
+    def final_ber(fam):
+        vals = []
+        for r in runs.get(fam, []):
+            v = [h["wm_fr_ber"] for h in _hist(r, tail) if h.get("wm_fr_ber") is not None]
+            if v: vals.append(st.mean(v))
+        return _ms(vals), len(vals)
+    def cost(fam):
+        vals = [(r.get("compute", {}).get("summary", {}) or {}).get("effort_ratio_gpu")
+                for r in runs.get(fam, [])]
+        vals = [float(v) for v in vals if v is not None]
+        return _ms(vals), len(vals)
+    rows = []
+    for nl in fig["layers"]:
+        (dm, ds), nd = final_ber(fig["fixed_fmt"].format(nl=nl))     # fixed-FR BER (detection)
+        (am, as_), na = final_ber(fig["adapt_fmt"].format(nl=nl))    # adaptive-FR BER (evasion)
+        (cm, cs), nc = cost(fig["adapt_fmt"].format(nl=nl))          # adaptive-FR compute, reduced shard
+        (fm, fs), nf = cost(fig["full_fmt"].format(nl=nl))           # adaptive-FR compute, full data (old fig4c)
+        if nd == 0 and na == 0 and nc == 0 and nf == 0:
+            continue
+        rows.append((nl, dm, ds, am, as_, cm, cs, fm, fs))
+    if not rows:
+        return None
+    dat = f"{fig['name']}.dat"
+    write_dat(os.path.join(out, "data", dat),
+              ["nl", "fixber", "fixber_sd", "adber", "adber_sd",
+               "adcost", "adcost_sd", "fullcost", "fullcost_sd"], rows)
+    nlmin, nlmax = rows[0][0], rows[-1][0]
+    # no on-plot title (matches the hand-tuned Overleaf fig4); the legend carries the meaning.
+    tex = (fig_open(fig, "xlabel={number of watermarked layers $N$},"
+                    "ylabel={BER / fraction of honest cost},"
+                    "xtick=data,ymin=0,ymax=1.08,unbounded coords=discard,"
+                    "legend columns=2,legend style={at={(0.5,-0.34)},anchor=north,"
+                    "/tikz/every even column/.append style={column sep=6pt}}") +
+           f"\\addplot[chonest,densely dashed,forget plot] coordinates {{({nlmin},1) ({nlmax},1)}};\n"
+           f"\\node[anchor=south east,font=\\scriptsize] at (axis cs:{nlmax},1) {{honest cost}};\n"
+           f"\\addplot[cprev,mark=square*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=fixber,y error=fixber_sd]{{{dat}}};\\addlegendentry{{fixed-scope FR: watermark BER (caught)}}\n"
+           f"\\addplot[cfr,mark=*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=adber,y error=adber_sd]{{{dat}}};\\addlegendentry{{adaptive FR: watermark BER (evades)}}\n"
+           f"\\addplot[cacc,mark=triangle*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=adcost,y error=adcost_sd]{{{dat}}};\\addlegendentry{{adaptive FR: compute, reduced data}}\n"
+           f"\\addplot[cfull,mark=diamond*,error bars/.cd,y dir=both,y explicit] "
+           f"table[x=nl,y=fullcost,y error=fullcost_sd]{{{dat}}};\\addlegendentry{{adaptive FR: compute, full data ($=$ honest)}}\n"
+           + fig_close(fig))
+    return dat, tex
+
 # ============================================================================
 # APPENDIX emitters (band / overlap / savings) -- kept from the original exporter
 # ============================================================================
 def emit_band(fig, runs, out, tail):
-    r = runs.get(fig["family"])
+    # `families` pools several honest runs into one per-class band (e.g. A1 covers classes 0-9,
+    # the T decades cover 10-99 -> together the full 100-class honest FareMark band).
+    fams = fig.get("families") or ([fig["family"]] if fig.get("family") else [])
+    r = [x for f in fams for x in runs.get(f, [])]
     if not r: return None
     pc = per_class_honest(r, tail); acc, loss = per_class_test(r)
     rows = []
@@ -757,11 +882,345 @@ def emit_savings(fig, runs, out, tail):
            fig_close(fig))
     return dat, tex
 
+# ============================================================================
+# APPENDIX (v2) -- class-difficulty rank / non-IID + alpha sweep / submarine tap+cost
+#   The *_stats helpers are imported by paper_figs_mpl.py so both outputs show the SAME numbers.
+# ============================================================================
+CIFAR100_NAMES = [
+    "apple", "aquarium fish", "baby", "bear", "beaver", "bed", "bee", "beetle", "bicycle", "bottle",
+    "bowl", "boy", "bridge", "bus", "butterfly", "camel", "can", "castle", "caterpillar", "cattle",
+    "chair", "chimpanzee", "clock", "cloud", "cockroach", "couch", "crab", "crocodile", "cup", "dinosaur",
+    "dolphin", "elephant", "flatfish", "forest", "fox", "girl", "hamster", "house", "kangaroo", "keyboard",
+    "lamp", "lawn mower", "leopard", "lion", "lizard", "lobster", "man", "maple tree", "motorcycle", "mountain",
+    "mouse", "mushroom", "oak tree", "orange", "orchid", "otter", "palm tree", "pear", "pickup truck", "pine tree",
+    "plain", "plate", "poppy", "porcupine", "possum", "rabbit", "raccoon", "ray", "road", "rocket",
+    "rose", "sea", "seal", "shark", "shrew", "skunk", "skyscraper", "snail", "snake", "spider",
+    "squirrel", "streetcar", "sunflower", "sweet pepper", "table", "tank", "telephone", "television", "tiger", "tractor",
+    "train", "trout", "tulip", "turtle", "wardrobe", "whale", "willow tree", "wolf", "woman", "worm"]
+assert len(CIFAR100_NAMES) == 100
+
+def class_name(c, runs_list=None):
+    """CIFAR-100 fine-label name (torchvision index order); falls back to 'class c' for
+    other datasets (e.g. food101 reuses the family names)."""
+    ds = None
+    for r in (runs_list or []):
+        ds = _dataset_of(r) or ds
+    if (ds in (None, "cifar100")) and 0 <= int(c) < 100:
+        return CIFAR100_NAMES[int(c)]
+    return f"class {c}"
+
+def fill_tokens(fig, **tok):
+    """Copy of a spec with @KEY@ tokens in caption/takeaway replaced by data-derived text."""
+    f = dict(fig)
+    for k in ("caption", "takeaway"):
+        if f.get(k):
+            for key, val in tok.items():
+                f[k] = f[k].replace(f"@{key}@", str(val))
+    return f
+
+def classrank_stats(runs, families, tail):
+    """Ranked honest per-class BER. Per class: tail-mean per seed -> mean/sd over seeds.
+    Returns (rows sorted easiest->hardest, groups). row = dict(rank, cls, mean, sd, n, g);
+    group = (family, lo_class, hi_class). A class seen in an earlier family is not repeated."""
+    rows, groups, seen = [], [], set()
+    for fam in families:
+        rr = runs.get(fam) or []
+        if not rr:
+            continue
+        pcs = per_class_honest_by_seed(rr, tail)
+        cls = [c for c in sorted(pcs) if pcs[c].get("ber") and c not in seen]
+        if not cls:
+            continue
+        gi = len(groups); groups.append((fam, min(cls), max(cls)))
+        for c in cls:
+            m, s = _ms(pcs[c]["ber"])
+            rows.append(dict(cls=c, mean=m, sd=s, n=len(pcs[c]["ber"]), g=gi)); seen.add(c)
+    rows.sort(key=lambda d: d["mean"])
+    for i, d in enumerate(rows):
+        d["rank"] = i + 1
+    return rows, groups
+
+def _tail_client_means(rr, tail, want_fr):
+    """Per (seed, cid) tail-mean BER of honest (want_fr=False) or free-rider clients."""
+    out = []
+    for r in rr:
+        frs = set(r.get("free_rider_indices") or [])
+        acc = defaultdict(list)
+        for h in _hist(r, tail):
+            for p in (h.get("wm_per_client") or []):
+                if ((p["cid"] in frs) == want_fr) and p.get("ber") is not None:
+                    acc[p["cid"]].append(float(p["ber"]))
+        out += [st.mean(v) for v in acc.values() if v]
+    return out
+
+def alpha_sweep_stats(runs, sweep, tail):
+    """One row per alpha setting present: honest mean + p10/p90 over (seed, honest client)
+    tail means; FR tail-mean wm_fr_ber per seed -> mean/sd over seeds."""
+    rows = []
+    for lbl, hf, ff in sweep:
+        hon, fr = runs.get(hf) or [], runs.get(ff) or []
+        if not hon and not fr:
+            continue
+        hv = _tail_client_means(hon or fr, tail, want_fr=False)
+        fv = []
+        for r in fr:
+            v = [h["wm_fr_ber"] for h in _hist(r, tail) if h.get("wm_fr_ber") is not None]
+            if v:
+                fv.append(st.mean(v))
+        hm = st.mean(hv) if hv else float("nan")
+        fm, fs = _ms(fv)
+        rows.append(dict(label=lbl, hmean=hm, hp10=pct(hv, 0.10), hp90=pct(hv, 0.90),
+                         fmean=fm, fsd=fs, nh=len(hon), nf=len(fr)))
+    return rows
+
+def honest_round_stats(runs, honest_fam, fallback_fams=()):
+    """{round: (mean, sd)} of wm_benign_ber over seeds (honest family, else benign clients
+    of the given attack families)."""
+    src = runs.get(honest_fam) or [r for f in fallback_fams for r in runs.get(f, [])]
+    by = defaultdict(list)
+    for r in src:
+        for h in _hist(r):
+            if h.get("wm_benign_ber") is not None:
+                by[h["round"]].append(float(h["wm_benign_ber"]))
+    return {rd: _ms(v) for rd, v in sorted(by.items())}
+
+def submarine_stats(runs, fam):
+    """Per round, for one submarine family (all FR cids x seeds):
+         ber[rd]    = (mean, sd over seeds) of wm_fr_ber
+         state[rd]  = majority action: 'tap' | 'coast' | 'warm' (trained, no tap/coast yet)
+         tapfrac[rd]= share of FR x seeds that tapped (among tap/coast)
+         cost[rd]   = mean cumulative FR samples / cumulative honest samples  (actual)
+         costcf[rd] = same, if every round the FR trained had cost an honest round
+                      (= the tap schedule WITHOUT the data reduction)"""
+    rr = runs.get(fam) or []
+    if not rr:
+        return None
+    ber_by, cnt = defaultdict(list), defaultdict(lambda: defaultdict(int))
+    cost_by, cf_by = defaultdict(list), defaultdict(list)
+    for r in rr:
+        hist = _hist(r)
+        rounds = [h["round"] for h in hist]
+        for h in hist:
+            if h.get("wm_fr_ber") is not None:
+                ber_by[h["round"]].append(float(h["wm_fr_ber"]))
+        comp = (r.get("compute", {}) or {}).get("per_client", {}) or {}
+        frs = {int(c) for c in (r.get("free_rider_indices") or [])} or \
+              {int(k) for k, c in comp.items() if c.get("is_free_rider")}
+        hon = [k for k in comp if int(k) not in frs]
+        def samples(k, rd):
+            pr = (comp[k].get("per_round") or {})
+            cell = pr.get(str(rd)) or pr.get(rd)
+            return None if cell is None else float(cell.get("samples", 0.0))
+        for k in comp:
+            if int(k) not in frs:
+                continue
+            act = {t.get("round"): t.get("action") for t in (comp[k].get("trace") or [])
+                   if t.get("action") in ("tap", "coast")}
+            ch = ca = ccf = 0.0
+            for rd in rounds:
+                hs = [samples(j, rd) for j in hon]
+                hs = [v for v in hs if v is not None]
+                h_rd = st.mean(hs) if hs else 0.0
+                fs = samples(k, rd)
+                a = act.get(rd)
+                trained = (a == "tap") or (a is None and (fs or 0.0) > 0)
+                state = a or ("warm" if trained else None)
+                if state:
+                    cnt[rd][state] += 1
+                ch += h_rd; ca += (fs or 0.0); ccf += (h_rd if trained else 0.0)
+                if ch > 0:
+                    cost_by[rd].append(ca / ch); cf_by[rd].append(ccf / ch)
+    rounds = sorted(set(ber_by) | set(cnt) | set(cost_by))
+    state, tapfrac = {}, {}
+    for rd in rounds:
+        c = cnt.get(rd, {})
+        if c:
+            state[rd] = max(("tap", "coast", "warm"), key=lambda s: (c.get(s, 0), s == "tap"))
+            n = c.get("tap", 0) + c.get("coast", 0)
+            tapfrac[rd] = c.get("tap", 0) / n if n else float("nan")
+    cost = {rd: st.mean(v) for rd, v in cost_by.items()}
+    costcf = {rd: st.mean(v) for rd, v in cf_by.items()}
+    last = max(cost) if cost else None
+    return dict(rounds=rounds, ber={rd: _ms(v) for rd, v in ber_by.items()}, state=state,
+                tapfrac=tapfrac, cost=cost, costcf=costcf, n=len(rr),
+                final=cost.get(last, float("nan")) if last else float("nan"),
+                finalcf=costcf.get(last, float("nan")) if last else float("nan"))
+
+GROUP_COLORS = ["chonest", "cfr", "cacc", "cfull", "cyel", "csky", "cprev", "cgrey"]
+GROUP_MARKS  = ["*", "square*", "triangle*", "diamond*", "pentagon*", "o", "square", "triangle"]
+SUB_COLORS   = ["cfr", "cfull", "cacc", "cyel"]
+NAN = float("nan")
+
+def emit_classrank(fig, runs, out, tail):
+    """(1) ranked honest per-class BER (x = rank, so partial decade coverage never bunches)."""
+    rows, groups = classrank_stats(runs, fig["families"], tail)
+    if not rows:
+        return None
+    allruns = [r for f in fig["families"] for r in runs.get(f, [])]
+    name = fig["name"]; N = len(rows)
+    write_dat(os.path.join(out, "data", f"{name}.dat"), ["rank", "class", "ber", "sd", "group"],
+              [(d["rank"], d["cls"], d["mean"], d["sd"], d["g"]) for d in rows])
+    plots = ""
+    for gi, (fam, lo, hi) in enumerate(groups):
+        gd = f"{name}_g{gi}.dat"
+        write_dat(os.path.join(out, "data", gd), ["rank", "class", "ber", "sd"],
+                  [(d["rank"], d["cls"], d["mean"], d["sd"]) for d in rows if d["g"] == gi])
+        col = GROUP_COLORS[gi % len(GROUP_COLORS)]; mk = GROUP_MARKS[gi % len(GROUP_MARKS)]
+        plots += (f"\\addplot[only marks,{col},mark={mk},mark size=1.6pt,"
+                  f"error bars/error bar style={{{col}!70,line width=0.5pt}},"
+                  f"error bars/.cd,y dir=both,y explicit] "
+                  f"table[x=rank,y=ber,y error=sd]{{{gd}}};\\addlegendentry{{classes {lo}--{hi}}}\n")
+    k = min(fig.get("n_label", 3), N // 2)
+    lab = rows[:k] + rows[N - k:] if k else []
+    nodes = "".join(f"\\node[rotate=90,anchor=west,font=\\tiny,inner sep=1.5pt] at "
+                    f"(axis cs:{d['rank']},{d['mean'] + d['sd']:.5f}) "
+                    f"{{{class_name(d['cls'], allruns)} ({d['cls']})}};\n" for d in lab)
+    top = max(d["mean"] + d["sd"] for d in rows)
+    lo, hi = rows[0]["mean"], rows[-1]["mean"]
+    ratio = f"{hi / lo:.0f}" if lo > 1e-3 else "$\\gg$10"
+    f2 = fill_tokens(fig, N=N, LO=f"{lo:.3f}", HI=f"{hi:.3f}", RATIO=ratio, TAIL=tail)
+    ncol = min(5, len(groups))
+    tex = (fig_open(f2, f"xlabel={{trigger classes, ranked easiest $\\to$ hardest}},"
+                        f"ylabel={{honest watermark BER}},ymin=0,ymax={top * 1.55:.4f},"
+                        f"xmin=0,xmax={N + 1},clip=false,ymajorgrids=true,grid style={{gray!20}},"
+                        f"legend columns={ncol},legend style={{at={{(0.5,-0.30)}},anchor=north,"
+                        "/tikz/every even column/.append style={column sep=5pt}}")
+           + plots + nodes + fig_close(f2))
+    return f"{name}.dat", tex
+
+def emit_niidalpha(fig, runs, out, tail):
+    """(2) non-IID: (a) alpha=0.5 timeline (same as before) | (b) converged BER vs alpha."""
+    parts = _attackcompare_parts(fig, runs, out, tail)
+    rows = alpha_sweep_stats(runs, fig.get("sweep", []), tail)
+    if parts is None and not rows:
+        return None
+    name = fig["name"]; ymax = fig.get("ymax", 0.6)
+    W = "0.43\\textwidth"; H = "4.6cm"
+    legend = "legend columns=1,legend cell align=left,legend style={at={(0.5,-0.30)},anchor=north}"
+    tex = fig_begin_multi(fig)
+    at = ""
+    if parts is not None:
+        dat, body = parts
+        tex += (f"\\begin{{axis}}[{AXBASE},name=pa,width={W},height={H},"
+                f"title={{(a) Dirichlet $\\alpha{{=}}0.5$ timeline}},title style={{font=\\small}},"
+                f"xlabel={{communication round}},ylabel={{watermark BER}},ymin=0,ymax={ymax},{legend}]\n"
+                f"{body}\\end{{axis}}\n")
+        at = "at={(pa.south east)},anchor=south west,xshift=1.5cm,"
+    if rows:
+        sd = f"{name}_alpha.dat"
+        write_dat(os.path.join(out, "data", sd),
+                  ["x", "alpha", "hon", "hon_p10", "hon_p90", "fr", "fr_sd"],
+                  [(i, r["label"], r["hmean"], r["hp10"], r["hp90"], r["fmean"], r["fsd"])
+                   for i, r in enumerate(rows)])
+        n = len(rows)
+        xt = ",".join(str(i) for i in range(n))
+        xl = ",".join(("IID" if r["label"].upper() == "IID" else f"${r['label']}$") for r in rows)
+        tex += (f"\\begin{{axis}}[{AXBASE},{at}width={W},height={H},"
+                f"title={{(b) converged BER vs.\\ skew}},title style={{font=\\small}},"
+                f"xlabel={{Dirichlet $\\alpha$ (more skewed $\\leftarrow$)}},ylabel={{converged BER}},"
+                f"xtick={{{xt}}},xticklabels={{{xl}}},xmin=-0.4,xmax={n - 0.6},ymin=0,ymax={ymax},"
+                f"unbounded coords=jump,{legend}]\n"
+                f"\\addplot[name path=blo,draw=none,forget plot] table[x=x,y=hon_p10]{{{sd}}};\n"
+                f"\\addplot[name path=bhi,draw=none,forget plot] table[x=x,y=hon_p90]{{{sd}}};\n"
+                f"\\addplot[chonest!18,forget plot] fill between[of=blo and bhi];\n"
+                f"\\addplot[chonest,mark=square*,mark size=1.6pt] table[x=x,y=hon]{{{sd}}};"
+                f"\\addlegendentry{{honest mean}}\n"
+                f"\\addlegendimage{{area legend,fill=chonest!18,draw=chonest!18}}"
+                f"\\addlegendentry{{honest 10--90\\,\\% clients}}\n"
+                f"\\addplot[cfr,mark=*,mark size=1.6pt,error bars/.cd,y dir=both,y explicit] "
+                f"table[x=x,y=fr,y error=fr_sd]{{{sd}}};\\addlegendentry{{reduced FR (random)}}\n"
+                f"\\end{{axis}}\n")
+    f2 = fill_tokens(fig, TAIL=tail)
+    return name + ".dat", tex + fig_end_multi(f2)
+
+def emit_submarine(fig, runs, out, tail):
+    """(3) submarine: BER timeline / tap-coast raster / cumulative cost, one shared x axis."""
+    stats = [(lbl, fam, submarine_stats(runs, fam)) for lbl, fam in fig["attacks"]]
+    stats = [(l, f, s) for l, f, s in stats if s]
+    if not stats:
+        return None
+    name = fig["name"]
+    hon = honest_round_stats(runs, fig.get("honest"), [f for _, f, _ in stats])
+    rounds = sorted(set(hon) | {rd for _, _, s in stats for rd in s["rounds"]})
+    xmin, xmax = rounds[0] - 0.5, rounds[-1] + 0.5
+    # --- data files
+    hdr = ["round", "hon", "hon_lo", "hon_hi"]; cols = []
+    for rd in rounds:
+        m, s = hon.get(rd, (NAN, 0.0)); cols.append([rd, m, max(0.0, m - s), m + s])
+    for i, (_, _, s) in enumerate(stats):
+        hdr += [f"a{i}", f"a{i}_lo", f"a{i}_hi", f"a{i}_cost", f"a{i}_costcf",
+                f"a{i}_tap", f"a{i}_coast", f"a{i}_warm"]
+        y = len(stats) - i
+        for row, rd in zip(cols, rounds):
+            m, sd = s["ber"].get(rd, (NAN, 0.0)); stt = s["state"].get(rd)
+            row += [m, max(0.0, m - sd), m + sd, s["cost"].get(rd, NAN), s["costcf"].get(rd, NAN),
+                    y if stt == "tap" else NAN, y if stt == "coast" else NAN,
+                    y if stt == "warm" else NAN]
+    dat = f"{name}.dat"
+    write_dat(os.path.join(out, "data", dat), hdr, [tuple(r) for r in cols])
+    # scale only axis: all three panels share the exact same plot width, so rounds line up.
+    X = f"xmin={xmin},xmax={xmax},scale only axis,width=0.80\\linewidth"
+    # --- top: BER
+    top = (f"\\begin{{axis}}[{AXBASE},name=s1,{X},height=3.0cm,ymin=0,ymax={fig.get('ymax', 0.6)},"
+           f"ylabel={{watermark BER}},xticklabels={{}},legend pos=north east,legend cell align=left,"
+           f"unbounded coords=jump]\n"
+           f"\\addplot[name path=hlo,draw=none,forget plot] table[x=round,y=hon_lo]{{{dat}}};\n"
+           f"\\addplot[name path=hhi,draw=none,forget plot] table[x=round,y=hon_hi]{{{dat}}};\n"
+           f"\\addplot[chonest!18,forget plot] fill between[of=hlo and hhi];\n"
+           f"\\addplot[chonest,mark=none,line width=1.2pt] table[x=round,y=hon]{{{dat}}};"
+           f"\\addlegendentry{{honest floor}}\n")
+    for i, (lbl, _, _) in enumerate(stats):
+        c = SUB_COLORS[i % len(SUB_COLORS)]
+        top += (f"\\addplot[name path=a{i}lo,draw=none,forget plot] table[x=round,y=a{i}_lo]{{{dat}}};\n"
+                f"\\addplot[name path=a{i}hi,draw=none,forget plot] table[x=round,y=a{i}_hi]{{{dat}}};\n"
+                f"\\addplot[{c}!12,forget plot] fill between[of=a{i}lo and a{i}hi];\n"
+                f"\\addplot[{c},mark=none] table[x=round,y=a{i}]{{{dat}}};"
+                f"\\addlegendentry{{submarine {lbl}}}\n")
+    top += "\\end{axis}\n"
+    # --- middle: what it does each round
+    k = len(stats)
+    yt = ",".join(str(k - i) for i in range(k))
+    yl = ",".join("{" + lbl + "}" for lbl, _, _ in stats)   # braces: labels contain commas
+    mid = (f"\\begin{{axis}}[{AXBASE},name=s2,at={{(s1.south west)}},anchor=north west,yshift=-0.15cm,"
+           f"{X},height={0.42 * k:.2f}cm,ymin=0.4,ymax={k + 0.6},ytick={{{yt}}},"
+           f"yticklabel style={{font=\\scriptsize}},"
+           f"yticklabels={{{yl}}},xticklabels={{}},ymajorgrids=false,xmajorgrids=true,"
+           f"grid style={{gray!15}},unbounded coords=discard]\n")
+    for i in range(k):
+        c = SUB_COLORS[i % len(SUB_COLORS)]
+        mid += (f"\\addplot[only marks,mark=|,cgrey,mark size=2pt] table[x=round,y=a{i}_warm]{{{dat}}};\n"
+                f"\\addplot[only marks,mark=o,{c},mark size=1.3pt] table[x=round,y=a{i}_coast]{{{dat}}};\n"
+                f"\\addplot[only marks,mark=*,{c},mark size=1.6pt] table[x=round,y=a{i}_tap]{{{dat}}};\n")
+    mid += "\\end{axis}\n"
+    # --- bottom: cumulative cost
+    bot = (f"\\begin{{axis}}[{AXBASE},name=s3,at={{(s2.south west)}},anchor=north west,yshift=-0.2cm,"
+           f"{X},height=2.2cm,ymin=0,ymax=1.12,ylabel={{cost / honest}},"
+           f"xlabel={{communication round}},unbounded coords=jump,legend columns=3,legend cell align=left,"
+           f"legend style={{at={{(0.5,-0.42)}},anchor=north,"
+           f"/tikz/every even column/.append style={{column sep=5pt}}}}]\n"
+           f"\\addplot[chonest,densely dashed,forget plot,domain={xmin}:{xmax}] {{1}};\n"
+           f"\\node[anchor=north east,font=\\scriptsize,chonest] at (axis cs:{xmax},1) {{honest}};\n")
+    for i in range(k):
+        c = SUB_COLORS[i % len(SUB_COLORS)]
+        bot += (f"\\addplot[{c},forget plot] table[x=round,y=a{i}_cost]{{{dat}}};\n"
+                f"\\addplot[{c},dashed,forget plot] table[x=round,y=a{i}_costcf]{{{dat}}};\n")
+    bot += ("\\addlegendimage{only marks,mark=*,black,mark size=1.6pt}\\addlegendentry{tap}\n"
+            "\\addlegendimage{only marks,mark=o,black,mark size=1.3pt}\\addlegendentry{coast}\n"
+            "\\addlegendimage{only marks,mark=|,cgrey,mark size=2pt}\\addlegendentry{warm-up}\n"
+            "\\addlegendimage{black}\\addlegendentry{actual cost}\n"
+            "\\addlegendimage{black,dashed}\\addlegendentry{cost w/ full-data taps}\n"
+            "\\end{axis}\n")
+    cost = ", ".join(f"${s['final']:.2f}\\times$ ({l})" for l, _, s in stats)
+    costf = ", ".join(f"${s['finalcf']:.2f}\\times$" for _, _, s in stats)
+    f2 = fill_tokens(fig, COST=cost, COSTFULL=costf, TAIL=tail)
+    return dat, fig_begin_multi(fig) + top + mid + bot + fig_end_multi(f2)
+
 EMIT = {"timeline": emit_timeline, "costtable": emit_costtable,
         "attackcompare": emit_attackcompare, "classbars": emit_classbars,
         "classscatter": emit_classscatter, "layers": emit_layers,
-        "costlayers": emit_costlayers,
-        "band": emit_band, "overlap": emit_overlap, "savings": emit_savings}
+        "costlayers": emit_costlayers, "costdetect": emit_costdetect,
+        "band": emit_band, "overlap": emit_overlap, "savings": emit_savings,
+        "classrank": emit_classrank, "niidalpha": emit_niidalpha, "submarine": emit_submarine}
 
 def main():
     ap = argparse.ArgumentParser()

@@ -24,6 +24,9 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import to_pgfplots as TP     # shared appendix stats -> identical numbers in PNG and Overleaf
 
 # ---- Okabe-Ito palette (identical hues to to_pgfplots COLORDEF) -------------
 C_HONEST = "#0072B2"   # blue   -> honest floor
@@ -177,6 +180,14 @@ def fig_attack(spec, runs, out, tail):
     if not present:
         print(f"  skip {spec['name']} (no attack families present)"); return
     fig, ax = plt.subplots(figsize=(6.6, 3.4))
+    _draw_attack(ax, spec, runs, present)
+    ax.legend(fontsize=9, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
+    return _save(fig, out, spec["name"])
+
+def _draw_attack(ax, spec, runs, present):
+    """honest floor band + one band/line per present attack family (shared by fig2 and the
+    non-IID appendix panel a)."""
+    hon = runs.get(spec["honest"])
     # honest floor: prefer the dedicated honest family, else benign clients of first attack
     if hon:
         benR = per_round(hon, "wm_benign_ber")
@@ -188,12 +199,13 @@ def fig_attack(spec, runs, out, tail):
         _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
     style = {"previous models": (C_PREV, "s"), "gaussian": (C_ACC, "^"),
              "ours (head2)": (C_FR, "o"), "ours (head)": (C_FR, "o")}
-    for lbl, fam in present:
+    cycle = [(C_FR, "o"), (C_PREV, "s"), (C_ACC, "^"), ("#CC79A7", "D")]   # for appendix labels not in `style`
+    for i, (lbl, fam) in enumerate(present):
         fR = per_round(runs.get(fam), "wm_fr_ber")
         rr = sorted(fR)
         if not rr:
             continue
-        col, mk = style.get(lbl, (C_FR, "o"))
+        col, mk = style.get(lbl, cycle[i % len(cycle)])
         ms = [_ms(fR[rd]) for rd in rr]
         _band(ax, rr, [m for m, s in ms], [s for m, s in ms], col, lbl, marker=mk)
     # -- threshold lines disabled for now (commented out) --
@@ -204,8 +216,6 @@ def fig_attack(spec, runs, out, tail):
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
     ax.set_ylim(0, spec.get("ymax", 0.8)); ax.grid(axis="x", visible=False)   # zoom BER axis (matches overleaf; baselines ~0.5-0.75 stay in frame)
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
-    ax.legend(fontsize=9, loc="center right"); ax.set_title(spec.get("title", ""), fontsize=11)
-    return _save(fig, out, spec["name"])
 
 # ============================================================================
 # fig3: class difficulty -- grouped bars + DeltaBER-vs-entropy scatter
@@ -321,6 +331,197 @@ def fig_costlayers(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 # ============================================================================
+# fig4 MERGED: detection (fixed FR BER) + evasion (adaptive FR BER) + cost (adaptive FR compute)
+# ============================================================================
+def fig_costdetect(spec, runs, out, tail):
+    def final_ber(fam):
+        vals = []
+        for r in runs.get(fam, []):
+            v = [h["wm_fr_ber"] for h in _hist(r, tail) if h.get("wm_fr_ber") is not None]
+            if v: vals.append(st.mean(v))
+        return _ms(vals), len(vals)
+    def cost(fam):
+        vals = [(r.get("compute", {}).get("summary", {}) or {}).get("effort_ratio_gpu")
+                for r in runs.get(fam, [])]
+        vals = [float(v) for v in vals if v is not None]
+        return _ms(vals), len(vals)
+    C_FULL = "#CC79A7"   # full-data adaptive cost (folded-in fig4c)
+    rows = []
+    for nl in spec["layers"]:
+        (dm, ds), nd = final_ber(spec["fixed_fmt"].format(nl=nl))
+        (am, asd), na = final_ber(spec["adapt_fmt"].format(nl=nl))
+        (cm, cs), nc = cost(spec["adapt_fmt"].format(nl=nl))         # reduced-shard cost
+        (fm, fs), nf = cost(spec["full_fmt"].format(nl=nl))          # full-data cost (old fig4c)
+        if nd == 0 and na == 0 and nc == 0 and nf == 0:
+            continue
+        rows.append((nl, dm, ds, am, asd, cm, cs, fm, fs))
+    if not rows:
+        print(f"  skip {spec['name']} (no layer-sweep families present)"); return
+    fig, ax = plt.subplots(figsize=(6.2, 4.2))
+    nls = [r[0] for r in rows]
+    ax.axhline(1.0, color=C_HONEST, ls="--", lw=1)
+    ax.text(nls[-1], 1.0, " honest cost", fontsize=9, va="bottom", ha="right")
+    ax.errorbar(nls, [r[1] for r in rows], yerr=[r[2] for r in rows], color=C_PREV,
+                marker="s", ms=5, lw=1.8, capsize=3, label="fixed-scope FR: watermark BER (caught)")
+    ax.errorbar(nls, [r[3] for r in rows], yerr=[r[4] for r in rows], color=C_FR,
+                marker="o", ms=5, lw=1.8, capsize=3, label="adaptive FR: watermark BER (evades)")
+    ax.errorbar(nls, [r[5] for r in rows], yerr=[r[6] for r in rows], color=C_ACC,
+                marker="^", ms=5, lw=1.8, capsize=3, label="adaptive FR: compute, reduced data")
+    ax.errorbar(nls, [r[7] for r in rows], yerr=[r[8] for r in rows], color=C_FULL,
+                marker="D", ms=5, lw=1.8, capsize=3, label="adaptive FR: compute, full data (= honest)")
+    ax.set_xticks(nls); ax.set_xlabel("number of watermarked layers $N$")
+    ax.set_ylabel("BER / fraction of honest cost"); ax.set_ylim(0, 1.08)
+    ax.grid(axis="x", visible=False)
+    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=2)
+    ax.set_title(spec.get("title", ""), fontsize=11)
+    return _save(fig, out, spec["name"])
+
+# ============================================================================
+# appendix: pooled honest per-class BER band (A + T groups -> all 100 classes)
+# ============================================================================
+def fig_band(spec, runs, out, tail):
+    fams = spec.get("families") or ([spec["family"]] if spec.get("family") else [])
+    rr = [x for f in fams for x in runs.get(f, [])]
+    if not rr:
+        print(f"  skip {spec['name']} (no honest families present)"); return
+    by = defaultdict(list)
+    for r in rr:
+        frs = set(r.get("free_rider_indices") or [])
+        for h in _hist(r, tail):
+            for p in (h.get("wm_per_client") or []):
+                if p["cid"] in frs:
+                    continue
+                if p.get("ber") is not None:
+                    by[int(p["trigger_class"])].append(float(p["ber"]))
+    if not by:
+        print(f"  skip {spec['name']} (no per-class BER)"); return
+    classes = sorted(by)
+    vals = [st.mean(by[c]) for c in classes]
+    sds = [st.pstdev(by[c]) if len(by[c]) > 1 else 0.0 for c in classes]
+    fig, ax = plt.subplots(figsize=(9, 3.0))
+    ax.bar(classes, vals, yerr=sds, color=C_HONEST, edgecolor="none",
+           error_kw=dict(ecolor="#33557a", elinewidth=0.7), width=0.85, zorder=3)
+    ax.set_xlabel("trigger class"); ax.set_ylabel("watermark BER"); ax.set_ylim(bottom=0)
+    ax.grid(axis="x", visible=False)
+    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+    ax.set_title(spec.get("title", ""), fontsize=11)
+    return _save(fig, out, spec["name"])
+
+
+# ============================================================================
+# APPENDIX (v2) -- twins of to_pgfplots emit_classrank / emit_niidalpha / emit_submarine
+#   (stats come from to_pgfplots so the numbers are identical)
+# ============================================================================
+PGF_HEX = {"chonest": "#0072B2", "cfr": "#D55E00", "cacc": "#009E73", "cfull": "#CC79A7",
+           "cyel": "#E69F00", "csky": "#56B4E9", "cprev": "#000000", "cgrey": "#999999"}
+MPL_MARK = {"*": "o", "square*": "s", "triangle*": "^", "diamond*": "D", "pentagon*": "p",
+            "o": "o", "square": "s", "triangle": "^"}
+
+def _clean(ax):
+    ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
+
+def fig_classrank(spec, runs, out, tail):
+    rows, groups = TP.classrank_stats(runs, spec["families"], tail)
+    if not rows:
+        print(f"  skip {spec['name']} (no honest families present)"); return
+    allruns = [r for f in spec["families"] for r in runs.get(f, [])]
+    N = len(rows)
+    fig, ax = plt.subplots(figsize=(7.0, 3.4))
+    for gi, (fam, lo, hi) in enumerate(groups):
+        g = [d for d in rows if d["g"] == gi]
+        col = PGF_HEX[TP.GROUP_COLORS[gi % len(TP.GROUP_COLORS)]]
+        mk = MPL_MARK[TP.GROUP_MARKS[gi % len(TP.GROUP_MARKS)]]
+        ax.errorbar([d["rank"] for d in g], [d["mean"] for d in g], yerr=[d["sd"] for d in g],
+                    fmt=mk, ms=4.5, color=col, ecolor=col, elinewidth=0.8, alpha=0.95,
+                    capsize=0, label=f"classes {lo}–{hi}", zorder=3)
+    k = min(spec.get("n_label", 3), N // 2)
+    for d in (rows[:k] + rows[N - k:] if k else []):
+        ax.annotate(f"{TP.class_name(d['cls'], allruns)} ({d['cls']})",
+                    (d["rank"], d["mean"] + d["sd"]), xytext=(0, 3), textcoords="offset points",
+                    rotation=90, ha="center", va="bottom", fontsize=7)
+    top = max(d["mean"] + d["sd"] for d in rows)
+    ax.set_xlim(0, N + 1); ax.set_ylim(0, top * 1.55)
+    ax.set_xlabel("trigger classes, ranked easiest → hardest"); ax.set_ylabel("honest watermark BER")
+    ax.grid(axis="x", visible=False); _clean(ax)
+    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=min(5, len(groups)))
+    lo, hi = rows[0]["mean"], rows[-1]["mean"]
+    ax.set_title(spec.get("title", "") + f"  ({N} classes, {lo:.3f}–{hi:.3f})", fontsize=10)
+    return _save(fig, out, spec["name"])
+
+def fig_niidalpha(spec, runs, out, tail):
+    present = [(lbl, fam) for lbl, fam in spec["attacks"] if runs.get(fam)]
+    rows = TP.alpha_sweep_stats(runs, spec.get("sweep", []), tail)
+    if not present and not rows:
+        print(f"  skip {spec['name']} (no non-IID families present)"); return
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(11, 3.8), gridspec_kw=dict(wspace=0.28))
+    if present:
+        _draw_attack(axA, spec, runs, present)
+        axA.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=1)
+    axA.set_title("(a) Dirichlet α=0.5 timeline", fontsize=10)
+    if rows:
+        xs = list(range(len(rows)))
+        axB.fill_between(xs, [r["hp10"] for r in rows], [r["hp90"] for r in rows],
+                         color=C_HONEST, alpha=0.18, lw=0, label="honest 10–90% clients")
+        axB.plot(xs, [r["hmean"] for r in rows], color=C_HONEST, marker="s", ms=4, lw=1.8,
+                 label="honest mean")
+        axB.errorbar(xs, [r["fmean"] for r in rows], yerr=[r["fsd"] for r in rows], color=C_FR,
+                     marker="o", ms=4, lw=1.8, capsize=3, label="reduced FR (random)")
+        axB.set_xticks(xs); axB.set_xticklabels([r["label"] for r in rows])
+        axB.set_xlim(-0.4, len(rows) - 0.6)
+        axB.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=1)
+    axB.set_ylim(0, spec.get("ymax", 0.6)); axB.grid(axis="x", visible=False); _clean(axB)
+    axB.set_xlabel("Dirichlet α (more skewed ←)"); axB.set_ylabel("converged BER")
+    axB.set_title("(b) converged BER vs. skew", fontsize=10)
+    return _save(fig, out, spec["name"])
+
+def fig_submarine(spec, runs, out, tail):
+    stats = [(lbl, fam, TP.submarine_stats(runs, fam)) for lbl, fam in spec["attacks"]]
+    stats = [(l, f, s) for l, f, s in stats if s]
+    if not stats:
+        print(f"  skip {spec['name']} (no submarine families present)"); return
+    hon = TP.honest_round_stats(runs, spec.get("honest"), [f for _, f, _ in stats])
+    k = len(stats)
+    fig, (a1, a2, a3) = plt.subplots(3, 1, figsize=(6.4, 5.6), sharex=True,
+                                     gridspec_kw=dict(height_ratios=[3.0, 0.45 * k, 2.2], hspace=0.08))
+    hr = sorted(hon)
+    if hr:
+        _band(a1, hr, [hon[r][0] for r in hr], [hon[r][1] for r in hr], C_HONEST, "honest floor")
+    for i, (lbl, _, s) in enumerate(stats):
+        col = PGF_HEX[TP.SUB_COLORS[i % len(TP.SUB_COLORS)]]
+        rr = sorted(s["ber"])
+        _band(a1, rr, [s["ber"][r][0] for r in rr], [s["ber"][r][1] for r in rr], col, f"submarine {lbl}")
+        y = k - i
+        for st_, mk, fc, ms in (("warm", "|", PGF_HEX["cgrey"], 6), ("coast", "o", "white", 3.5),
+                                 ("tap", "o", col, 4.5)):
+            xs = [r for r, v in s["state"].items() if v == st_]
+            a2.plot(xs, [y] * len(xs), ls="none", marker=mk, ms=ms, mfc=fc,
+                    mec=(PGF_HEX["cgrey"] if st_ == "warm" else col), mew=0.9)
+        cr = sorted(s["cost"])
+        a3.plot(cr, [s["cost"][r] for r in cr], color=col, lw=1.6)
+        a3.plot(cr, [s["costcf"][r] for r in cr], color=col, lw=1.4, ls="--")
+    a1.set_ylim(0, spec.get("ymax", 0.6)); a1.set_ylabel("watermark BER")
+    a1.legend(fontsize=8, loc="upper right"); a1.grid(axis="x", visible=False)
+    a2.set_ylim(0.4, k + 0.6); a2.set_yticks([k - i for i in range(k)])
+    a2.set_yticklabels([l for l, _, _ in stats], fontsize=8); a2.grid(axis="y", visible=False)
+    a3.axhline(1.0, color=C_HONEST, ls="--", lw=1)
+    a3.text(a3.get_xlim()[1], 0.97, "honest", color=C_HONEST, fontsize=8, ha="right", va="top")
+    a3.set_ylim(0, 1.12); a3.set_ylabel("cost / honest"); a3.set_xlabel("communication round")
+    a3.grid(axis="x", visible=False)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], ls="none", marker="o", ms=4.5, color="k", label="tap"),
+               Line2D([], [], ls="none", marker="o", ms=3.5, mfc="white", mec="k", label="coast"),
+               Line2D([], [], ls="none", marker="|", ms=6, color=PGF_HEX["cgrey"], label="warm-up"),
+               Line2D([], [], color="k", lw=1.6, label="actual cost"),
+               Line2D([], [], color="k", lw=1.4, ls="--", label="cost w/ full-data taps")]
+    a3.legend(handles=handles, fontsize=8, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.42))
+    for ax in (a1, a2, a3):
+        _clean(ax)
+    print("    final cost / honest: " + ", ".join(
+        f"{l}: {s['final']:.2f} (full-data taps {s['finalcf']:.2f})" for l, _, s in stats))
+    return _save(fig, out, spec["name"])
+
+# ============================================================================
 # tab1: cost table -> CSV + rendered PNG
 # ============================================================================
 def tab_costs(spec, runs, out, tail):
@@ -387,20 +588,38 @@ FIGS = [
     # ---- FareMark class difficulty (combined bars + entropy scatter twin), head families ----
     dict(name="fig3_class_difficulty", kind="classdiff",
          honest="A1_honest_c100", fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
-    # ---- white-box layer sweeps: detection (fig4a) + cost (fig4b) + full-data cost (fig4c) ----
-    dict(name="fig4a_detection_layers", kind="layers",
-         honest_fmt="G_A1_honest_c100_ws_L{nl}", fr_fmt="G_L1_graftblock_head2_c36_ws_L{nl}",
-         layers=[1, 6, 20], eta_t=0.20, eta_l=0.50,
-         title="White-box: deeper embedding catches the fixed free-rider"),
-    dict(name="fig4b_cost_layers", kind="costlayers",
-         fr_fmt="G_Ladapt_c36_ws_L{nl}", layers=[1, 6, 20],   # rn18/c100: head2=1, block2=6, full=20
-         title="White-box: adaptive free-rider pays honest cost as the mark deepens"),
-    dict(name="fig4c_cost_layers_full", kind="costlayers",
-         fr_fmt="G_Ladaptfull_c36_ws_L{nl}", layers=[1, 6, 20],   # cpc=-1 full-data variant of fig4b
-         title="White-box: adaptive free-rider, full data (cpc=-1)"),
+    # ---- white-box layer sweeps: MERGED detection+cost (fig4) + full-data cost (fig4c) ----
+    dict(name="fig4_detect_cost", kind="costdetect",
+         fixed_fmt="G_L1_graftblock_head2_c36_ws_L{nl}", adapt_fmt="G_Ladapt_c36_ws_L{nl}",
+         full_fmt="G_Lfull_c36_ws_L{nl}", layers=[1, 6, 20],   # fig4c folded in as the full-data cost line
+         title="White-box: caught cheap, or it pays the honest cost"),
+]
+
+# appendix twins (rendered with --appendix) -- kept in lock-step with to_pgfplots APPENDIX_FIGURES
+APPENDIX_FIGS = [
+    dict(name="app_faremark_class_band", kind="classrank", n_label=3,
+         families=["A1_honest_c100",
+                   "T4_honest_c100_cls1019", "T5_honest_c100_cls2029", "T8_honest_c100_cls3039",
+                   "T1_honest_c100_cls4049", "T9_honest_c100_cls5059", "T6_honest_c100_cls6069",
+                   "T7_honest_c100_cls7079", "T10_honest_c100_cls8089", "T2_honest_c100_cls9099"],
+         title="FareMark: honest BER floor per trigger class (ranked)"),
+    dict(name="app_niid_reduced_timeline", kind="niidalpha", honest="E1_honest_niid_c100", ymax=0.6,
+         attacks=[("reduced FR (random assign)", "E2_reduced_niid_c36"),
+                  ("reduced FR (distribution assign)", "EA2_reduced_niid_distrib_c36")],
+         sweep=[("0.1", "E3_honest_niid_c100_a01", "E3_reduced_niid_c36_a01"),
+                ("0.5", "E1_honest_niid_c100",     "E2_reduced_niid_c36"),
+                ("1.0", "E3_honest_niid_c100_a10", "E3_reduced_niid_c36_a10"),
+                ("IID", "A1_honest_c100",          "A3_reduced_c100_c36")],
+         eta_t=0.161, eta_l=0.576),
+    dict(name="app_submarine_timeline_k9", kind="submarine", honest="A1_honest_c100", ymax=0.6,
+         attacks=[("easy 1,7", "K9_alldyn_head2_c17"),
+                  ("hard 3,6", "K9_alldyn_head2_c36")],
+         eta_t=0.064, eta_l=0.264),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
-        "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs}
+        "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs,
+        "costdetect": fig_costdetect, "band": fig_band,
+        "classrank": fig_classrank, "niidalpha": fig_niidalpha, "submarine": fig_submarine}
 
 
 # ============================================================================
@@ -420,6 +639,19 @@ def _spec_families(spec):
                 + [spec["fr_fmt"].format(nl=nl) for nl in spec["layers"]])
     if k == "costlayers":
         return [spec["fr_fmt"].format(nl=nl) for nl in spec["layers"]]
+    if k == "costdetect":
+        return ([spec["fixed_fmt"].format(nl=nl) for nl in spec["layers"]]
+                + [spec["adapt_fmt"].format(nl=nl) for nl in spec["layers"]]
+                + [spec["full_fmt"].format(nl=nl) for nl in spec["layers"]])
+    if k in ("band", "classrank"):
+        return spec.get("families") or ([spec["family"]] if spec.get("family") else [])
+    if k == "niidalpha":
+        fams = [spec["honest"]] + [f for _, f in spec["attacks"]]
+        for _, hf, ff in spec.get("sweep", []):
+            fams += [hf, ff]
+        return list(dict.fromkeys(fams))
+    if k == "submarine":
+        return [spec["honest"]] + [f for _, f in spec["attacks"]]
     if k == "costtable":
         out = []
         for _, fam in spec["rows"]:
@@ -461,12 +693,15 @@ def main():
     ap.add_argument("--dataset", default=None,
                     help="keep only runs from this dataset (cifar100 | food101); set it "
                          "when a results folder mixes datasets (families are shared).")
+    ap.add_argument("--appendix", action="store_true",
+                    help="render the APPENDIX_FIGS set instead of the paper set.")
     a = ap.parse_args()
     runs = load(a.res, a.dataset)
     print(f"loaded families: {sorted(runs)}")
     only = set(a.only.split(",")) if a.only else None
-    print(f">>> PAPER FIGURES (matplotlib) -> {a.out}")
-    for spec in FIGS:
+    figset = APPENDIX_FIGS if a.appendix else FIGS
+    print(f">>> {'APPENDIX' if a.appendix else 'PAPER'} FIGURES (matplotlib) -> {a.out}")
+    for spec in figset:
         if only and spec["name"] not in only:
             continue
         produced = EMIT[spec["kind"]](spec, runs, a.out, a.tail)   # emitters now return True when a png was written

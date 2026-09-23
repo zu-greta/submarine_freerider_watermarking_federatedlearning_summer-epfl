@@ -94,11 +94,32 @@ phase_plot(){
   echo "   matplotlib PNG/PDF: $FIGS"
 }
 
-# appendix set (non-IID / other datasets / overlaps / savings). Off by default.
+# appendix set (honest band A+T / combined non-IID / submarine timeline). Off by default.
+#   pgfplots -> $EXPORT (menu all_figures_appendix.tex) ; matplotlib PNG twins -> $FIGS.
+#   app_* figure names never collide with the paper set, so EXPORT is shared.
 phase_appendix(){
-  mkdir -p "$EXPORT"; echo ">>> APPENDIX FIGURES -> $EXPORT"
-  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL --appendix"
-  echo "   menu: $EXPORT/all_figures_appendix.tex"
+  mkdir -p "$EXPORT" "$FIGS"
+  echo ">>> APPENDIX FIGURES (pgfplots) -> $EXPORT   [dataset=$DATASET]"
+  run "$TP --res '$ALL' --out '$EXPORT' --tail $TAIL --appendix --dataset $DATASET"
+  echo ">>> APPENDIX FIGURES (matplotlib) -> $FIGS   [dataset=$DATASET]"
+  run "$MP --res '$ALL' --out '$FIGS' --tail $TAIL --appendix --dataset $DATASET"
+  echo "   pgfplots menu: $EXPORT/all_figures_appendix.tex  (\\input under your Appendix)"
+}
+
+# Food-101 -> APPENDIX. Food-101 reuses the CIFAR-100 family names and lives in its OWN
+# results dir, so it gets its OWN export folder (never clobbers the cifar100 paper .tex).
+# It re-runs the PAPER figure specs (timelines/table/fig4) on the food101 data, tagged food101.
+#   Overrides: FOOD_RES (results dir), FOOD_EXPORT (.tex/.dat), FOOD_FIGS (PNG).
+phase_appendix_food(){
+  local FRES="${FOOD_RES:-/food101}"
+  local FEXPORT="${FOOD_EXPORT:-$FRES/export_food101}"
+  local FFIGS="${FOOD_FIGS:-$FRES/figs_food101}"
+  mkdir -p "$FEXPORT" "$FFIGS"
+  echo ">>> FOOD-101 appendix figures (pgfplots) -> $FEXPORT"
+  run "$TP --res '$FRES/*/result.json' --out '$FEXPORT' --tail $TAIL --dataset food101"
+  echo ">>> FOOD-101 appendix figures (matplotlib) -> $FFIGS"
+  run "$MP --res '$FRES/*/result.json' --out '$FFIGS' --tail $TAIL --dataset food101"
+  echo "   food101 menu: $FEXPORT/all_figures.tex  (\\input under your Appendix; keep in a separate folder)"
 }
 
 # ---------------------------------------------------------------------------
@@ -361,8 +382,10 @@ case "${1:-help}" in
   manifest)  phase_manifest ;;
   submit)    phase_submit ;;
   plot)      phase_plot ;;
-  paper)     phase_plot ;;        # alias: paper figures + table (pgfplots)
-  appendix)  phase_appendix ;;    # appendix figure set (pgfplots)
+  paper)     phase_plot ;;        # alias: paper figures + table (pgfplots + mpl)
+  appendix)  phase_appendix ;;    # appendix set: honest band (A+T), non-IID, submarine
+  appendix-food) phase_appendix_food ;;   # food-101 paper figs -> its own appendix export folder
+  appendix-all)  phase_appendix; phase_appendix_food ;;
   plot-legacy) phase_plot_legacy ;;   # dormant: old full matplotlib suite
   all-submit) phase_manifest; phase_submit ;;   # 1 -> 2
   *)
@@ -376,8 +399,9 @@ runbook.sh -- run phases
 
   LOCALLY (set RES=~/local/results):
     RES=~/local/results ./runbook.sh plot     4. PAPER figures+table -> pgfplots (export/)
-    RES=~/local/results ./runbook.sh appendix 4b. appendix figure set (pgfplots)
-    (plot-legacy = the old full matplotlib PNG suite, dormant)
+    RES=~/local/results ./runbook.sh appendix      4b. appendix set (band A+T, non-IID, submarine)
+    FOOD_RES=~/local/results/food101 ./runbook.sh appendix-food   4c. food-101 figs -> appendix
+    (appendix-all = both; plot-legacy = the old full matplotlib PNG suite, dormant)
 
   batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD .
 USAGE
