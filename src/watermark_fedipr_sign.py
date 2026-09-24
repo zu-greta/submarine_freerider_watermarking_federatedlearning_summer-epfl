@@ -1,5 +1,4 @@
-"""FedIPR feature-based (white-box) sign watermark -- embedded across one or more
-normalization layers (server-decided), read white-box from the weights.
+"""FedIPR feature-based (white-box) sign watermark 
 
 ================================================================================
  FedIPR white box hides bit string in signs of norm scale weights + reads white box
@@ -24,8 +23,7 @@ import torch
 # Carrier -- which normalization scales carry the mark.
 # ---------------------------------------------------------------------------
 def list_bn_scale_names(model) -> list:
-    """All 1-D normalization scale weights (BN/norm/downsample-BN), in model order
-    (input -> output). The last entry is the output-block scale."""
+    """All 1-D normalization scale weights (BN/norm/downsample-BN)"""
     names = []
     for n, p in model.named_parameters():
         if p.ndim == 1 and n.endswith("weight") and (
@@ -38,7 +36,7 @@ def list_bn_scale_names(model) -> list:
 
 
 def resolve_carrier_names(model, carrier: str = "auto_last_bn", n_layers: int = 1) -> list:
-    """Return the ordered list of carrier param names (output-most first).
+    """ordered list of carrier param names 
 
     carrier="auto_last_bn" -> the last `n_layers` normalization scales (from output backward). n_layers=1 == the single output-layer scale.
     carrier="all_bn"       -> every normalization scale 
@@ -75,7 +73,7 @@ def plan_bits(channels, bits_per_layer: int, n_clients: int) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Per-client secret keys (E_i) + target bits (B_i), one pair per carrier layer.
+# Per-client secret keys (E_i) + target bits (B_i), one pair per carrier layer
 # ---------------------------------------------------------------------------
 def _make_bits(n_bits: int, seed: int) -> torch.Tensor:
     g = torch.Generator().manual_seed(int(seed) + 7919)
@@ -120,7 +118,7 @@ def sign_embed_loss(gammas, Es, bits_list, margin: float = 0.1) -> torch.Tensor:
 
 @torch.no_grad()
 def sign_ber(gammas, Es, bits_list) -> float:
-    """Total per-bit BER over all carriers = (sum wrong bits) / (sum bits).
+    """Total per-bit BER over all carriers = (sum wrong bits) / (sum bits)
     Honest (all carriers embedded) ~0; a free-rider that only re-embedded some carriers
     keeps the others at chance -> ber ~ (untrained bits / total bits) * 0.5."""
     wrong = tot = 0

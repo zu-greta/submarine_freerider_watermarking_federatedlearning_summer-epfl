@@ -1,31 +1,5 @@
 #!/usr/bin/env python
-"""plots.py -- TODO cleanup the plotting 
-
-Subcommands (one per figure family):
-
-  honest_lines     honest BER per trigger class over rounds         -> A1/E1/T1/T2_class_floors
-                   (--classes restricts/relabels the classes shown; used for the
-                    trigger-class generality figures on CIFAR-100 decades 40-49, 90-99)
-  honest_per_round honest BER + trigger-class accuracy per round    -> A1/E1/EA1_honest_per_round
-                   + no watermark control
-  class_acc        per-client trigger vs non-trigger vs global acc  -> A0_class_acc
-  sweep            +N data-budget spectrum (reduced FR)             -> D1_spectrum
-  timeline         BER vs round, taps/coasts, eta lines             -> A2/A3/E2/E3 timelines
-  accuracy         global test acc, attack vs honest                -> accuracy_K4/K5
-  dirichlet_dist   reference heatmap of the Dirichlet partition     -> dirichlet_dist
-  gpu_savings      cumulative compute, FR vs honest                 -> gpu_savings_*
-  iso_pair         isolated same-class BER, honest vs FR            -> iso_*  (cross-run)
-  iso_acc          isolated same-class accuracy, honest vs FR       -> iso_acc_*
-
-  --- submarine + final block (K/J/L) tap-coast, views ---
-  tap_perfr        seed-band single graph (mean over seeds)         -> tap_perfr_* / tap_J4_*
-  tap_perseed      one panel per seed (no marker collisions)        -> *_perseed
-  tap_effort       BER + cumulative samples side by side (effort)   -> *_effort
-
-Usage:
-  python plots.py honest_lines --in 'results/*/result.json' --family A1_honest_c100 --out figs/A1_class_floors
-  python plots.py tap_perseed  --in 'results/*/result.json' --family K4_alldyn_block2_c36 \
-      --honest_in 'results/*/result.json' --honest_family A1_honest_c100 --out figs/tap_perfr_K4
+"""plots.py 
 """
 from __future__ import annotations
 import argparse, glob, json, os, re
@@ -38,33 +12,30 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-# ###########################################################################
-# ##  EDITABLE CONSTANTS  --  change thresholds / windows here             ##
-# ###########################################################################
+# #########################
+# ##  EDITABLE CONSTANTS ##
+# #########################
 TAIL = 20                    # "converged" window = last N rounds (calibration + tail-mean)
 
-# Two reference detection thresholds, drawn on the timelines / tap plots.
-# IID (Group A/D/K) values are the frozen references
-ETA_TIGHT_IID  = 0.064       # aggressive (mu+3s over round-means) 
-ETA_LOOSE_IID  = 0.264       # lenient    (mu+3s over per-client)  
+# reference thresholds - not used
+ETA_TIGHT_IID  = 0.064       # (mu+3s over round-means) 
+ETA_LOOSE_IID  = 0.264       # (mu+3s over per-client)  
 # non-IID (Group E/EA) values -- pass with --eta_tight/--eta_loose 
 ETA_TIGHT_NIID = 0.161
 ETA_LOOSE_NIID = 0.576
 
-ETA_TIGHT_DEFAULT = ETA_TIGHT_IID   # used when neither CLI nor run config gives one
+ETA_TIGHT_DEFAULT = ETA_TIGHT_IID  
 ETA_LOOSE_DEFAULT = ETA_LOOSE_IID
 
-# honest_per_round: how to bucket a trig_acc==0 client-round 
-SUPPRESS_BER = 0.12          # trig_acc==0 AND BER <  this -> watermark SUPPRESSION (expected)
-STARVE_BER   = 0.30          # trig_acc==0 AND BER >= this -> data STARVATION (non-IID empty shard)
+SUPPRESS_BER = 0.12          
+STARVE_BER   = 0.30          
 
-DIRICHLET_ALPHAS = [0.1, 0.5, 1.0]   # dirichlet_dist reference heatmaps
-HARD_DRAW_GAP    = -10       # class_acc: trig-class acc this far below global => "HARD draw" flag
+DIRICHLET_ALPHAS = [0.1, 0.5, 1.0]   # dirichlet_dist reference 
+HARD_DRAW_GAP    = -10       
 
 
 # ###########################################################################
 # ##  EDITABLE TEXT  --  every axis label / band label / line label.       ##
-# ##  Change the wording here; it applies across all figures.              ##
 # ###########################################################################
 LBL_ROUND      = "communication round"
 LBL_BER        = "bit-error-rate  (0 = mark present · 0.5 = no mark)"
@@ -74,7 +45,6 @@ LBL_BER_HONEST = "honest bit-error-rate"
 # Output-layer scheme -> BER axis semantics.
 #   faremark: bit-error-rate, chance (no mark) = 0.5.
 #   fedipr  : ber = 1 - trigger_accuracy, so "no mark" = 1 - 1/num_classes (~0.99).
-# Set via --scheme fedipr; labels are reassigned in main().
 SCHEME = "faremark"
 NOMARK = 0.5
 
@@ -162,7 +132,6 @@ def stacked_panels(n, figsize=None, height_ratios=None):
     return fig, ([axes] if n == 1 else list(axes))
 
 
-# a tiny namespace so ported bodies that say ps.C_HONEST / ps.finish still work
 ps = SimpleNamespace(OKABE=OKABE, CYCLE=CYCLE, C_HONEST=C_HONEST, C_FR=C_FR,
                      C_GOOD=C_GOOD, C_BAD=C_BAD, finish=finish,
                      stacked_panels=stacked_panels)
@@ -627,10 +596,6 @@ def sweep(a):
 # ##  GROUP A/D/E -- BER-vs-round timeline (reduced free-riders)           ##
 # ###########################################################################
 def _majority_marks(tap_ct, coa_ct, rounds):
-    """For each round, pick the SINGLE action most seeds/clients agree on, so the two
-    marker types never overlap and EVERY attacker round gets exactly one symbol
-    (reference only). tap_ct/coa_ct are {round: count}; ties -> 'tap' (assume it
-    trained). Returns two disjoint, sorted lists (tap_rounds, coast_rounds)."""
     taps, coasts = [], []
     for rd in sorted(rounds):
         t, c = tap_ct.get(rd, 0), coa_ct.get(rd, 0)
@@ -641,23 +606,10 @@ def _majority_marks(tap_ct, coa_ct, rounds):
 
 
 def _is_H_family(family) -> bool:
-    """True for the baseline-free-rider positive controls (H5_prevmodel, H6_gaussian, ...).
-    Used to suppress the thin per-client FR lines on the H timelines only."""
     return bool(family) and re.match(r"^H\d", str(family)) is not None
 
 
 def _fr_self_signals(runs):
-    """Aggregate the adaptive (submarine) free-rider's own bookkeeping across seeds and
-    FR cids, for overlaying on a timeline:
-
-        probe_mean {round: mean self-probed BER (trace 'ber_before')}   -> why it taps
-        eta_est    frozen estimated threshold the FR used (median)      -> the FR's η̂
-        target     frozen tap target = η̂ - margin (median)             -> probe>target ⇒ tap
-        defect     first free-ride round (min over FRs/seeds)
-
-    All values are None/empty when the family is NOT an adaptive_tap run (the
-    previous_models / gaussian / reduced traces carry no probe/eta/target), so the
-    caller can simply skip drawing them -- the A/D/E/H timelines are unchanged."""
     probe = defaultdict(list)
     etas, margins, targets, defects = [], [], [], []
     for r in runs:
@@ -694,9 +646,6 @@ def _fr_self_signals(runs):
 
 
 def timeline(a):
-    """BER over rounds: honest mean band, free-rider mean band, taps/coasts, 
-    frozen eta lines, and (--honest_in) honest floor at the FR's own classes.
-    -> A2/A3_timeline, E2/E3_timeline."""
     runs = [r for r in load(a.inp) if (a.family is None or fam(r) == a.family)
             and (a.seed is None or r.get("seed") == int(a.seed))]
     if not runs:
@@ -706,9 +655,7 @@ def timeline(a):
     r_ref = runs[0]
     rounds = [h["round"] for h in r_ref.get("history", [])]
 
-    # H plots (positive controls) ONLY: drop the thin per-client FR lines. Auto-detected
-    # from the family name (H5_/H6_/...), or forced with --no_fr_indiv. Every other group
-    # keeps its individual FR lines.
+    # H plots (positive controls) 
     hide_fr_indiv = _is_H_family(a.family) or bool(getattr(a, "no_fr_indiv", False))
 
     taps, coasts = defaultdict(int), defaultdict(int)
@@ -797,8 +744,6 @@ def timeline(a):
     _nomark(ax)
 
     # --- adaptive free-rider self-bookkeeping overlay (submarine K/J only) ---------
-    # Shows WHY it taps: the FR's self-probed BER vs its own frozen target (probe>target
-    # ⇒ tap) and its estimated threshold η̂. Empty (skipped) for A/D/E/H/reduced runs.
     probe_mean, fr_eta, fr_target, defect = _fr_self_signals(runs)
     if probe_mean:
         px = sorted(probe_mean); py = [probe_mean[r] for r in px]
@@ -1238,8 +1183,8 @@ def _tap_fraction(seeds):
 
 
 def tap_perfr(a):
-    """VIEW 1 (seed-band): one figure per free-rider, mean over seeds with a std band.
-    tap/coast markers are drawn where the MAJORITY of seeds tapped/coasted.
+    """view 1 (seed-band): one figure per free-rider, mean over seeds with a std band.
+    tap/coast markers are drawn where the majority of seeds tapped/coasted.
     -> tap_perfr_* / tap_J4_*."""
     fams = a.families or ([a.family] if a.family else None)
     if not fams:
@@ -1291,7 +1236,6 @@ def tap_perfr(a):
             ax.axhline(eta_l, color=C_HONEST, ls="--", lw=1.7, label=f"{LBL_ETA_LOOSE} = {eta_l:.3f}")
             ax.axhline(eta_t, color="black", ls=":", lw=1.3, label=f"{LBL_ETA_TIGHT} = {eta_t:.3f}")
             _nomark(ax)
-            # the FR's OWN frozen threshold η̂ and tap target (probe>target ⇒ tap)
             if data[cid]["eta_est"] is not None:
                 ax.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.5,
                            label=f"{LBL_FR_ETA} = {data[cid]['eta_est']:.3f}")
@@ -1315,7 +1259,7 @@ def tap_perfr(a):
 
 
 def tap_perseed(a):
-    """VIEW 2 (per-seed panels): one figure per free-rider, with one panel per seed so
+    """view 2 (per-seed panels): one figure per free-rider, with one panel per seed so
     the tap/coast markers of different seeds never collide.  -> *_cid<cid>_perseed."""
     fams = a.families or ([a.family] if a.family else None)
     if not fams:
@@ -1361,7 +1305,6 @@ def tap_perseed(a):
                            edgecolor=C_FR, zorder=6, label=(LBL_COAST if si == 0 else None))
                 ax.axhline(eta_l, color=C_HONEST, ls="--", lw=1.4)
                 ax.axhline(eta_t, color="black", ls=":", lw=1.1)
-                # FR's own frozen threshold η̂ and tap target (label once, on the top panel)
                 if data[cid]["eta_est"] is not None:
                     ax.axhline(data[cid]["eta_est"], color=OKABE["purple"], ls=(0, (6, 2)), lw=1.3,
                                label=(f"{LBL_FR_ETA}" if si == 0 else None))
@@ -1380,7 +1323,7 @@ def tap_perseed(a):
 
 
 def tap_effort(a):
-    """VIEW 3 (BER + effort side by side): one figure per free-rider, two panels:
+    """biew 3 (BER + effort side by side): one figure per free-rider, two panels:
     left = server BER over rounds (mean±band) with the eta lines + honest twin;
     right = cumulative samples, free-rider vs honest mean (effort).
     -> *_cid<cid>_effort."""
@@ -1472,22 +1415,14 @@ def tap_effort(a):
 # ##  CLI                                                                   ##
 # ###########################################################################
 
-# ###########################################################################
-# ##  POOLED views  --  reproduce the paper's single global watermark      ##
-# ##  number, and expose the per-class band that the mean averages over.   ##
-# ###########################################################################
 PAPER_ACC_RESNET_C100 = 99.71   # FareMark Table II: ResNet-18 / CIFAR-100 / 100 clients, all-honest
 
 def _families_of(a):
-    """Families to pool: --families wins, else the single --family."""
     if getattr(a, "families", None):
         return list(a.families)
     return [a.family] if a.family else [None]
 
 def _perclass_floors(runs, tail):
-    """{trigger_class: floor}. Floor = tail-mean of the seed-averaged per-round
-    honest BER -- identical definition to honest_lines, so the pooled band and the
-    per-family floor figures agree bit-for-bit."""
     by_cr = defaultdict(lambda: defaultdict(list))
     max_round = 0
     for r in runs:
@@ -1524,9 +1459,7 @@ def _pooled_round_ber(runs):
 
 
 def pooled_band(a):
-    """Per-class honest BER floor for EVERY trigger class, pooled across
-    A1 + T1 + T2 (+ T3), ranked. Exposes the whole difficulty band that the
-    paper's single mean number hides.  -> pooled_band_AT."""
+    """Per-class honest BER floor for evrey trigger class, pooled across A1 + T1 + T2 (+ T3), ranked."""
     tail = a.tail or TAIL
     fams = _families_of(a)
     allruns = load(a.inp)
@@ -1572,9 +1505,6 @@ def pooled_band(a):
 
 
 def pooled_mean(a):
-    """Paper-style single global number: pooled honest watermark accuracy
-    (=100*(1-BER)) per round, converging to a tail mean +/- std to line up
-    against FareMark Table II.  -> pooled_mean_AT."""
     tail = a.tail or TAIL
     fams = _families_of(a)
     allruns = load(a.inp)
@@ -1620,9 +1550,7 @@ def pooled_mean(a):
 
 
 def honest_floors_all(a):
-    """Merged honest-floor timeline across every decade family (A1 + T1..T7 ...),
-    10 clients at a time. One faint BER-vs-round line per (family,class), colored
-    by that class's converged floor; bold pooled mean; eta lines."""
+    """Merged honest-floor timeline across every decade family (A1 + T1..T7 ...)"""
     import matplotlib.cm as cm
     from matplotlib.colors import Normalize
     tail = a.tail or TAIL
@@ -1697,11 +1625,7 @@ def honest_floors_all(a):
 
 
 def overlap(a):
-    """honest per-class BER band vs free-rider on one BER axis. 
-    Honest(hard) can sit above FR(easy) -> the two populations interleave,
-    so no single global threshold separates them.  -> overlap.
-      --families  = honest decade families (define the band)
-      --fr_in     = submarine result glob (FR operating points, auto-detected)"""
+    """honest per-class BER band vs free-rider on one BER axis"""
     tail = a.tail or TAIL
     et, el = eta_pair(a)
     allruns = load(a.inp)
@@ -1768,7 +1692,7 @@ def overlap(a):
     ax.set_xlim(0, 1.05); ax.set_ylim(bottom=min(-0.01, lo - 0.02))
     ax.set_ylabel(LBL_BER_HONEST)
     n_over = int((hvals > el).sum())
-    ax.set_title("Honest band vs free-rider operating points\n"
+    ax.set_title("Honest band vs free-ride\n"
                  f"honest floors span {lo:.2f}–{hi:.2f}; FR points sit inside the band "
                  f"-> no single η separates them")
     ax.legend(fontsize=7.5, loc="upper left", framealpha=0.95)
@@ -1778,11 +1702,7 @@ def overlap(a):
 
 
 def roc(a):
-    """Threshold dilemma / ROC.  Per family (setting), sweep eta and compute honest
-    FPR(eta)=P(honest BER>=eta) and free-rider FNR(eta)=P(FR BER<eta) over the tail.
-    Left: FPR (solid) & FNR (dashed) vs eta; dot = min of max(FPR,FNR) (best achievable
-    balanced error). Right: ROC (TPR=1-FNR vs FPR) with AUC. Overlay settings via
-    --families; honest pool = own-run honest clients (+ optional --honest_in).  -> roc_*."""
+    """Threshold dilemma / ROC"""
     tail = a.tail or TAIL
     fams = _families_of(a)
     runs_all = load(a.inp)
@@ -1826,10 +1746,7 @@ def roc(a):
 
 
 def iso_compare(a):
-    """Side-by-side isolated same-class BER across settings (IID vs non-IID, ...).
-    Pairs honest_in[i] with fr_in[i] as panel i; shared --class. Each panel's η is
-    RECOMPUTED from that panel's honest clients (μ+3σ), so a stale baked-in η never
-    leaks in. Panel labels from --families (else the FR family name).  -> iso_compare_*."""
+    """Side-by-side isolated same-class BER across settings (IID vs non-IID, ...)"""
     if not (getattr(a, "honest_in", None) and getattr(a, "fr_in", None)):
         raise SystemExit("iso_compare needs --honest_in and --fr_in (paired, same length)")
     hg, fg = a.honest_in, a.fr_in
@@ -1848,7 +1765,6 @@ def iso_compare(a):
         _, _, fr_info = _iso_series(fruns[0])
         target = a.cls if a.cls is not None else next(
             (int(d["tc"]) for _, d in sorted(fr_info.items()) if d["fr"] and d["tc"] is not None), None)
-        # recalibrate eta per panel from THIS setting's honest clients
         eta_l = mu3s(converged_perclient(hruns, tail=tail, free_rider=False)) or ETA_LOOSE_DEFAULT
         means = [np.mean(v) for v in honest_ber_by_round(hruns).values() if v]
         eta_t = mu3s(means) or ETA_TIGHT_DEFAULT
@@ -1874,9 +1790,6 @@ def iso_compare(a):
 
 
 def starvation(a):
-    """FR embedding health across settings: trigger images the FR actually holds
-    (n_trigger_train) and its converged BER, red-flagged when starved (n=0, no probe,
-    or BER≥STARVE_BER). Explains WHEN the attack breaks under non-IID.  -> starvation_*."""
     tail = a.tail or TAIL
     fams = _families_of(a); runs_all = load(a.inp); rows = []
     for f in fams:
@@ -1919,9 +1832,7 @@ def starvation(a):
 
 
 def savings_vs_alpha(a):
-    """Compute saved (1 - FR/honest cumulative samples) and tap-fraction per free-rider
-    across settings (families). Shows the ~70% floor holds and that coasting collapses
-    (tap-fraction -> 100%) on hard / non-IID classes.  -> savings_vs_alpha_*."""
+    """Compute saved (1 - FR/honest cumulative samples) and tap-fraction per free-rider"""
     fams = _families_of(a); runs_all = load(a.inp); rows = []
     for f in fams:
         runs = pick(runs_all, f) if f else runs_all
@@ -1975,18 +1886,6 @@ def _fmt(x, nd=1, pct=False):
 
 
 def savings_table(a):
-    """Emit latex table of FR savings
-
-      Setting | cid (class) | W | samples saved % | tap-frac % |
-      FR BER (post, mean+/-std) | recall @ eta_tight | recall @ eta_loose
-
-    All numbers are computed from the same per-round server-measured BER and the
-    per-client cumulative sample counts the detector/accountant sees
-
-      python plots.py savings_table --in 'runs/*result.json' \\
-          --families K9_alldyn_head2_c36 K9_alldyn_head2_c17 L1_graftblock_head2_c36 \\
-          --eta_tight 0.064 --eta_loose 0.264 --out tables/savings.tex
-    """
     fams = _families_of(a)
     runs_all = load(a.inp)
     rows = []
@@ -2017,8 +1916,6 @@ def savings_table(a):
 
         # GPU-saved RATIO = 1 - effort_ratio_gpu, where effort_ratio_gpu is
         # fr_mean_gpu_ms/honest_mean_gpu_ms measured within each run 
-        # This is a ratio, not wall-clock, and is a run-level aggregate over all FRs (not per-cid),
-        # Mean over seeds.
         gsav = []
         for r in runs:
             s = (r.get("compute", {}) or {}).get("summary", {}) or {}

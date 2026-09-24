@@ -14,11 +14,6 @@ Pipeline (equation numbers refer to the paper):
   6. Extract by averaging z over N_T trigger samples, then sign.          (Eq. 15)
   7. Detect via bit-error-rate vs the registered bits, threshold eta.     (Eq. 16)
 
-Smoothing: cross-entropy makes the softmax steep (one class ~1, the rest ~0), 
-so the projection would be decided by the argmax alone and the
-watermark couldn't be shaped without hurting accuracy. f(x)=x^a with 0<a<1
-amplifies the small tail probabilities so they can carry the bits while the
-argmax (the true class) is preserved. (section IV-A, Fig. 6.)
 """
 from __future__ import annotations
 
@@ -56,15 +51,6 @@ SIN_ALPHA_MAX = _math.pi / 2      # sin(a*x) is monotone on x in [0,1] only for 
 
 def smoothing_gain(kind: str, alpha: float, lo: float = 0.05, hi: float = 0.70,
                    eps: float = 1e-8) -> float:
-    """How much f() amplifies a tail probability relative to a peak one.
-
-    gain = [f(lo)/f(hi)] / (lo/hi).  gain=1 means f does nothing and the projection 
-    stays dominated by p_max:
-
-        power alpha=0.4   -> 4.91   (working default)
-        sin   alpha=0.4   -> 1.01   <-- the bug: no smoothing whatsoever
-        sin   alpha=pi/2  -> 1.23   (best sin can do while staying monotone)
-    """
     f = (lambda x: (x + eps) ** alpha) if kind == "power" else (lambda x: _math.sin(alpha * x))
     return (f(lo) / f(hi)) / (lo / hi)
 
@@ -204,7 +190,7 @@ def bit_error_rate(bits: torch.Tensor, target: torch.Tensor) -> float:
 
 
 def detected(ber: float, eta: float) -> bool:
-    """Watermark considered present (benign client) iff BER < eta (Eq. 16).
+    """Watermark considered present (benign client) iff BER < eta (Eq. 16)
     """
     return ber < eta
 
@@ -224,9 +210,6 @@ def calibrate_eta(benign_bers, floor: float = 0.05) -> float:
 def dominance_ratio(probs: torch.Tensor, kind: str = "power", alpha: float = 0.4,
                     exclude: int | None = None) -> float:
     """Eq. 6/10 diagnostic: mean over samples of f(p_max) / sum_j f(p_j).
-
-    The paper requires this to stay below 0.5 so the watermark is not dominated
-    by the single largest probability. 
     """
     if exclude is not None:
         keep = [c for c in range(probs.shape[1]) if c != exclude]

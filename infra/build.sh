@@ -3,8 +3,17 @@
 
 set -eu
 
+if [ -f .env ]; then
+    export $(echo $(cat .env | sed 's/#.*//g' | xargs))
+else
+    echo "Error: .env file not found."
+    exit 1
+fi
+
+echo "IMAGE_NAME: $IMAGE"
+
 TARGET_PLATFORM="linux/amd64"
-IMAGE_NAME="registry.rcp.epfl.ch/sacs-zu/faremark:latest"
+IMAGE_NAME=$IMAGE
 
 docker buildx build \
     -f Dockerfile \

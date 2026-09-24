@@ -15,24 +15,15 @@ _NORM = {
     "food101": ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
 }
 
-# Food-101 fast-path knobs (env-overridable; FOOD_SIZE mirrors datasets.py).
+# Food-101 fast-path knobs (
 FOOD_SIZE = int(os.environ.get("FOOD_SIZE", "64"))
-# translation-crop padding for GPU-side augmentation of the food TRAIN store
-# (cheap stand-in for RandomResizedCrop; set FOOD_FAST_PAD=0 to disable aug).
 FOOD_PAD = int(os.environ.get("FOOD_FAST_PAD", "8"))
-# Concurrency knobs for the one-time Food-101 decode+cache (see _food_arrays).
-# When a whole pool of workers starts a food101 batch and the cache does not yet
-# exist, exactly ONE worker decodes while the others wait and then load it.
 FOOD_CACHE_WAIT = int(os.environ.get("FOOD_CACHE_WAIT", "3600"))   # max s a waiter blocks
 FOOD_CACHE_POLL = int(os.environ.get("FOOD_CACHE_POLL", "5"))      # poll interval (s)
-FOOD_CACHE_STALE = int(os.environ.get("FOOD_CACHE_STALE", "1800")) # lock age (s) => builder died
+FOOD_CACHE_STALE = int(os.environ.get("FOOD_CACHE_STALE", "1800")) # lock age
 
 
 class GPUImageStore:
-    """The whole dataset as one uint8 tensor on the GPU, plus its labels.
-    Built once per run and shared by reference across every client loader
-    """
-
     def __init__(self, images_u8: torch.Tensor, labels: torch.Tensor,
                  mean, std, pad: int, device):
         self.images = images_u8.to(device, non_blocking=True)   # [N,C,H,W] uint8
@@ -47,9 +38,7 @@ class GPUImageStore:
 
     @classmethod
     def from_torchvision(cls, ds, name: str, device, pad: int = 4, train: bool = True):
-        """Pull the raw uint8 array out of a torchvision dataset, or -- for JPEG
-        datasets like Food-101 that have no in-memory `.data` -- decode every image
-        once into a uint8 tensor and cache it to disk for later runs."""
+        """Pull the raw uint8 array out of a torchvision dataset"""
         name = name.lower()
         mean, std = _NORM[name]
 
@@ -67,7 +56,7 @@ class GPUImageStore:
         else:
             raise TypeError(f"{type(ds).__name__} has no .data and no decoder for '{name}'")
 
-        # Only the TRAIN store gets GPU-side crop+flip augmentation.
+        # Only the train store gets GPU-side crop+flip augmentation.
         if train and name in ("cifar10", "cifar100"):
             pad = pad if pad else 4
         elif train and name == "food101":
@@ -89,11 +78,6 @@ def _labels_of(ds):
 
 # ---------------------------------------------------------------------------
 # Food-101: decode every JPEG once into a uint8 [N,C,S,S] tensor + disk cache.
-# torchvision's Food101 has no in-memory .data, so the DataLoader re-decodes
-# every image every epoch -- that is what starves the GPU. We decode once at
-# FOOD_SIZE, cache to <root>/food-101/cache/, and serve GPU-resident thereafter.
-# The array index matches the torchvision dataset index (image_files[i]/labels[i]),
-# so the client shard indices still line up.
 # ---------------------------------------------------------------------------
 def _decode_food_to_uint8(ds, size):
     from PIL import Image
@@ -109,7 +93,6 @@ def _decode_food_to_uint8(ds, size):
             if i % 10000 == 0:
                 print(f"  [fast_data] decoding food101 {i}/{len(paths)} -> {size}px")
         return arr, torch.as_tensor(labs, dtype=torch.long)
-    # version-agnostic fallback: read raw PIL with the transform disabled
     tf = getattr(ds, "transform", None)
     imgs, labs = [], []
     try:
@@ -126,7 +109,7 @@ def _decode_food_to_uint8(ds, size):
 
 
 def _try_load_cache(cache):
-    """Load a finished cache blob, or None if it is absent / not yet readable."""
+    """Load a finished cache blob, or None if it is absent"""
     if not os.path.exists(cache):
         return None
     try:
@@ -166,7 +149,7 @@ def _food_arrays(ds, split, size):
             os.mkdir(lockdir)                     # sole builder
             builder = True
         except FileExistsError:
-            builder = False                       # someone else is building -> wait
+            builder = False                       # wait
 
         if builder:
             try:
@@ -269,7 +252,7 @@ class FastLoader:
 
         n, c, h, w = x.shape
         p = s.pad
-        # pad with the normalised value of a zero pixel (see module docstring)
+        # pad with the normalised value of a zero pixel 
         xp = x.new_empty((n, c, h + 2 * p, w + 2 * p))
         xp[:] = s._fill
         xp[:, :, p:p + h, p:p + w] = x

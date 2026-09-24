@@ -428,7 +428,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     # exclude_col controls whether the trigger-class column is dropped from the watermark projection. DEFAULT None = full softmax (faremark paper)
     if bool(getattr(cfg, "wm_exclude_trigger", False)):
         exclude_col = "trigger"                    # per-client -> its own trigger_class
-        l = wm.grouping(num_classes - 1, m)        # ablation? fit projection into n-1 columns
+        l = wm.grouping(num_classes - 1, m)        # ablation - fit projection into n-1 columns
     else:
         exclude_col = None                         # full softmax (no trigger-class exclusion)
         l = wm.grouping(num_classes, m)
@@ -545,7 +545,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                 trigger_class = cid % num_classes
             bal = bool(getattr(cfg, "wm_balanced_keys", False)) # keep false
             key = wm.make_key(m, l, seed=seed + 1000 * cid + 1, balanced=bal)
-            unembed.append(wm.unembeddable_fraction(key)) # compute the fraction of same-sign rows (structurally unembeddable)
+            unembed.append(wm.unembeddable_fraction(key)) # compute the fraction of same-sign rows (unembeddable)
             bits = wm.make_bits(m, seed=seed + 1000 * cid + 1) # random target bits for the watermark
             reg_exclude = exclude_col              # None = full softmax; "trigger" = extra tests
             registry.register(cid, trigger_class, key, bits,
@@ -606,7 +606,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
                     honest_min=getattr(cfg, "tap_honest_min", 6),
                     warmup_cap=getattr(cfg, "tap_warmup_cap", 15),
                     **wm_args, **common))
-            # graftblock attack (group L): reduced + scope-limited -- graft dropped
+            # head-only (graftblock) attack (group L): reduced + scope-limited -- note: graft dropped
             elif attack == "graftblock":
                 cls = make_graftblock_attack(WatermarkClient)
                 clients.append(cls(
@@ -729,7 +729,7 @@ class GaussianNoiseFreeRider(Client):
         return fake, self.num_samples                       # no training
 
 
-# Honest Client carries the same flags so callers can treat all clients uniformly.
+# Honest Client carries the same flags 
 Client.is_free_rider = False
 Client.attack_name = "honest"
 
@@ -858,9 +858,7 @@ class _SimpleFRMixin:
 
     def _prepare_fedipr(self, common_per_class: int, n_probe_holdout: int = 0,
                         n_common_classes: int = -1, trigger_train_n: int = -1):
-        """FedIPR analogue of _prepare: split the client's own trigger set into an
-        embed slice + a held-out probe slice, and build a reduced task loader of
-        N common-class images from the shard"""
+        """FedIPR: split the client's own trigger set into embed slice + held-out probe slice"""
         if getattr(self, "_prepared", False):
             return
         self._prepared = True
@@ -913,8 +911,7 @@ class _SimpleFRMixin:
             self._reduced_loader = []                    # trigger-only: no task batches
 
     def _prepare_sign(self, common_per_class: int, n_common_classes: int = -1):
-        """FedIPR-sign analogue of _prepare: no trigger imgs/class. mark carried by model weights
-        Build reduced task loader of `common_per_class` images per class from the shard."""
+        """FedIPR-white-box: no trigger imgs/class. mark carried by model weights"""
         if getattr(self, "_prepared", False):
             return
         self._prepared = True
@@ -1051,7 +1048,7 @@ def make_adaptive_tap_attack(base_cls):
 
         # full => everything trainable (identical to the honest path).
         #   head2 = softmax fc + the conv layer just before it (last 5 tensors, ~21%)
-        #   block2 = last 20 tensors (~80%).  Kept identical to GraftBlockFreeRider
+        #   block2 = last 20 tensors (~80%)
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
 
         def __init__(self, *a, oracle_eta: float = 0.0, honest_rounds: int = 12,
@@ -1234,7 +1231,7 @@ def make_adaptive_tap_attack(base_cls):
             """The model the FR submits if it coasts:
               decay  -> FR's own last-tapped weights (mark frozen flat (replay, same every round)
               graft  -> global body + FR's frozen last-tapped mark head. Body tracks global, frozen head
-            The threshold probes this before deciding tap/coast"""
+            threshold probes this before deciding tap/coast"""
             if self._last_submit is None:
                 return global_state
             if self.coast_mode == "decay":
@@ -1265,7 +1262,7 @@ def make_adaptive_tap_attack(base_cls):
             return out, self.num_samples
 
         # ---- self-probe -----------------
-        # Only threshold-tapping and self-eta need the probe to decide, but always recorded for (fade/recovery measurement)
+        # Only threshold-tapping and self-eta need the probe to decide
         def _probe_needed(self):
             return (self.when == "threshold") or (self.eta_source == "self")
 
@@ -1326,10 +1323,9 @@ def make_adaptive_tap_attack(base_cls):
     return AdaptiveTapFreeRider
 
 # ------------------------------------------------------------------------------ #
-#  Final layers Attack (group L):  -- our attack                       
-#  honest warmup, then every free-ride round: train only the last layers on a
-#  reduced shard (cpc)
-#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it)
+#  Head-Only Attack (group L):  -- our attack                       
+#  honest warmup, then every free-ride round: train only the last layers on a reduced shard (cpc)
+#    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it) (head = softmax fc)
 #    cpc    <- autop_common_per_class ; warmup <- autop_honest_until/_calib_rounds
 # ------------------------------------------------------------------------------ #
 def make_graftblock_attack(base_cls):
@@ -1339,11 +1335,11 @@ def make_graftblock_attack(base_cls):
         attack_name = "graftblock"
         # ---- SCOPE = trailing parameter tensors stay trainable ----
         # ResNet-18: 62 named parameter tensors. freeze earlier layers at global model
-        #   "head2"  keep = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
+        #   "head2" = 5  -> [layer4.1.conv2.weight, layer4.1.bn2.{weight,bias},
         #                          fc.weight, fc.bias]  ~= 2.41M scalars (~21%).
-        #            = the SOFTMAX/OUTPUT layer (fc) + the conv layer right before
+        #   "head"  = the SOFTMAX/OUTPUT layer (fc) 
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
-        # note: other scopes dropped
+        # note: other scopes dropped - only using head
 
         def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,
                      calib_rounds: int = 4, scope: str = "head2", graft: bool = False,

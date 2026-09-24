@@ -36,10 +36,10 @@ def build_manifest(cfg, args=None) -> dict:
         sweep_level = getattr(cfg, sweep_var, None)
 
     return {
-        "family": family,                        # e.g. "A2_train_then_attack"
-        "note": _get("manifest_note") or "",     # one-line human hypothesis
-        "sweep_var": sweep_var,                  # config field being swept, e.g. "attack_round"
-        "sweep_level": sweep_level,              # this run's value of that field
+        "family": family,                       
+        "note": _get("manifest_note") or "",    
+        "sweep_var": sweep_var,                 
+        "sweep_level": sweep_level,            
         "attack": getattr(cfg, "attack", "none"),
         "partition": getattr(cfg, "partition", "iid"),
         "dirichlet_alpha": getattr(cfg, "dirichlet_alpha", None),

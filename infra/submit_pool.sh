@@ -3,13 +3,13 @@
 # submit_pool.sh 
 #   ./submit_pool.sh                 # PODS=2, WORKERS=6, reads ./jobs.tsv
 #
-# Build the manifest first, from your existing leg definitions:
+# Build the manifest first
 #   rm -f jobs.tsv
 # =============================================================================
 set -uo pipefail
 
-PODS="${PODS:-2}"                  # <-- number of runai jobs == number of GPUs
-WORKERS="${WORKERS:-6}"            # default concurrent runs INSIDE each pod
+PODS="${PODS:-2}"                  # <-- number of runai jobs = number of GPUs
+WORKERS="${WORKERS:-6}"            # default concurrent runs inside each pod
 read -r -a _POOLS   <<< "${POOLS:-}"        # optional per-pod node-pool
 read -r -a _WORKERS <<< "${WORKERS_LIST:-}" # optional per-pod worker count
 JOBS_FILE="${JOBS_FILE:-jobs.tsv}"
@@ -25,7 +25,7 @@ else echo "Error: .env file not found!"; exit 1; fi
   echo "    rm -f $JOBS_FILE && DRYRUN=1 ./run_everything.sh submit"
   exit 1; }
 
-GIT_REPO="https://github.com/zu-greta/submarine_freerider_watermarking_federatedlearning_summer-epfl.git"
+GIT_REPO=$REPO
 GIT_BRANCH="${GIT_BRANCH:-main}"
 SCRIPT="${SCRIPT:-scripts/run_experiment.py}"
 
@@ -37,16 +37,15 @@ if [ -n "${_B:-}" ] && [ -n "${_E:-}" ] && [ "$_E" -gt "$_B" ]; then
   if [ "${_BAD:-0}" -gt 0 ]; then
     echo "!! INTERNAL BUG: $_BAD single quote(s) inside the pod block (lines $_B-$_E)."
     sed -n "$((_B+1)),$((_E-1))p" "$0" | grep -n "'" | head
-    echo "   Replace them with double quotes. Nothing was submitted."
+    echo "   Nothing was submitted."
     exit 1
   fi
   
   _BS=$(sed -n "$((_B+1)),$((_E-1))p" "$0" | grep -c "[\\]" || true)
   if [ "${_BS:-0}" -gt 0 ]; then
     echo "!! INTERNAL BUG: $_BS backslash(es) inside the pod block (lines $_B-$_E)."
-    echo "   runai eats them: printf newline becomes a literal n, tab becomes t."
     sed -n "$((_B+1)),$((_E-1))p" "$0" | grep -n "[\\]" | head
-    echo "   Use echo instead of printf, and cut -f instead of IFS. Nothing submitted."
+    echo "   Nothing submitted."
     exit 1
   fi
   echo "self-check: pod block is quote-clean and backslash-clean (lines $_B-$_E)"
@@ -106,7 +105,7 @@ for ((i=0; i<PODS; i++)); do
     --command -- bash -c '
       # POD_BLOCK_BEGIN  
       set -uo pipefail
-      export USER=zu
+      export USER="$USERNAME"
       mkdir -p "$RESULTS_ROOT" "$DATA_ROOT" "$RESULTS_ROOT/.poollogs"
       exec > >(tee "$RESULTS_ROOT/.poollogs/pool_w${SHARD_ID}.log") 2>&1
 
@@ -124,14 +123,14 @@ for ((i=0; i<PODS; i++)); do
       echo "  workers         $WORKERS"
 
       # ---- code ---------------------------------------------------------
-      rm -rf /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl
-      git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl 2>&1 | sed "s/^/  /"
-      [ -d "/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl" ] || { echo "ERROR: /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl missing"; exit 3; }
-      GIT_COMMIT="$(git -C /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl rev-parse HEAD 2>/dev/null || echo unknown)"
+      rm -rf "$TMPREPO"
+      git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" "$TMPREPO" 2>&1 | sed "s/^/  /"
+      [ -d "$TMPREPO" ] || { echo "ERROR: "$TMPREPO" missing"; exit 3; }
+      GIT_COMMIT="$(git -C "$TMPREPO" rev-parse HEAD 2>/dev/null || echo unknown)"
       export GIT_COMMIT GIT_BRANCH
       echo "  commit          $GIT_COMMIT"
-      export PYTHONPATH="/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl"
-      cd "/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl"
+      export PYTHONPATH="$TMPREPO"
+      cd "$TMPREPO"
 
       # keep N processes from each grabbing every core
       export OMP_NUM_THREADS=2 MKL_NUM_THREADS=2
@@ -203,7 +202,7 @@ PY
         return 0
       }
 
-      # ---- drain the shard, WORKERS at a time ----------------------------
+      # ---- workers at a time ----------------------------
       while IFS= read -r line; do
         [ -z "${line:-}" ] && continue
         tag=$(printf "%s" "$line" | cut -f1)
@@ -254,7 +253,7 @@ fi
 if [ "$SUBMITTED" -lt "$PODS" ]; then
   echo "=== PARTIAL: only $SUBMITTED/$PODS pods submitted ==="
   echo "The queue is shared, so the pod(s) that did start will still drain all"
-  echo "$TOTAL runs -- just slower. Rerun with the SAME POOL_TAG to add the rest:"
+  echo "$TOTAL runs. Rerun with the SAME POOL_TAG to add the rest:"
   echo "  POOL_TAG=$POOL_TAG ./submit_pool.sh"
 else
   echo "=== $SUBMITTED/$PODS pods submitted ==="
@@ -264,7 +263,7 @@ cat <<EOF
 
   runai list jobs                                  # expect $SUBMITTED faremark-$POOL_TAG job(s)
   kubectl logs -n $NAMESPACE -l release=faremark-${POOL_TAG}-w0 -f
-  ls ${MOUNT}/home/zu/results/.poollogs/           # per-pod progress logs
+  ls ${MOUNT}${RESULTDIR}/.poollogs/           # per-pod progress logs
 
 Resume after a preemption -- safe, skips finished runs:
   POOL_TAG=$POOL_TAG ./submit_pool.sh

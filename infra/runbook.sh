@@ -30,7 +30,7 @@ DETERMINISM="${DETERMINISM:-0}"    # 0 = cuDNN autotuner on (~1.3-2x; stat. iden
 PODS="${PODS:-2}"; WORKERS="${WORKERS:-6}"
 MPS="${MPS:-1}"
 
-# Per-dataset results tree. cifar100 keeps the original flat path (back-compat)
+# Per-dataset results tree
 if [ "$DATASET" = "cifar100" ]; then
   RES="${RES:-/mnt/nfs/home/zu/results}"
 else
@@ -42,13 +42,13 @@ ALL="$RES/*/result.json"
 # ---- frozen references for plotting ----
 HON=A1_honest_c100                 # honest calibration family (IID, c100, 10 clients)
 HONCLASS="${HONCLASS:-A1_honest_c100}"   # all-honest family for the class-acc bar chart
-ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose - for reference only TBD
-ETA_T_NIID="0.161"; ETA_L_NIID="0.576"   # non-IID eta tight / loose
+ETA_T="0.064"; ETA_L="0.264"       # IID  eta tight / loose - not used
+ETA_T_NIID="0.161"; ETA_L_NIID="0.576"   # non-IID eta tight / loose - not used
 # ---- FedIPR backdoor (group F) frozen references ----
 HON_FI="${HON_FI:-F_A1_honest_c100_fi}"        # FedIPR honest calibration family (IID, c100)
 # ber_fedipr = 1 - trigger_acc; honest floor ~ 0; chance = 0.99 
 ETA_T_FI="${ETA_T_FI:-0.20}"; ETA_L_FI="${ETA_L_FI:-0.50}"   # FedIPR eta tight / loose
-# ---- FedIPR SIGN / white-box (group G) frozen references ----
+# ---- FedIPR sign / white-box (group G) frozen references ----
 HON_WS="${HON_WS:-G_A1_honest_c100_ws}"        # FedIPR-sign honest calibration family (IID, c100)
 # ber_sign = Hamming(sign(gamma.E),B)/N; honest floor ~ 0, chance = 0.5 
 ETA_T_WS="${ETA_T_WS:-0.20}"; ETA_L_WS="${ETA_L_WS:-0.50}"   # FedIPR-sign eta tight / loose
@@ -59,7 +59,7 @@ MP="python ../scripts/paper_figs_mpl.py"   # paper figures/table -> matplotlib (
 EXPORT="${EXPORT:-$RES/export}"            # where the .dat/.tex land
 FIGS="${FIGS:-$RES/figs}"                  # where the matplotlib PNG/PDF land
 TAIL="${TAIL:-20}"                         # converged-tail window (final-BER, bands)
-run(){ echo "== $*"; eval "$*" || echo "   (skipped -- family may not exist yet)"; }
+run(){ echo "== $*"; eval "$*" || echo "   (skipped)"; }
 
 # ---------------------------------------------------------------------------
 phase_manifest(){
@@ -80,9 +80,6 @@ phase_submit(){
 
 # ---------------------------------------------------------------------------
 # 4. PAPER figures + table -> pgfplots (Overleaf) + matplotlib (PNG/PDF)
-#    Same set in both: fig1 (faremark/fedipr/sign timelines) / tab1 (costs) /
-#    fig2 (attack compare) / fig3 (class difficulty) / fig4 (layer sweep).
-#    All 3-seed, std shown. 
 # ---------------------------------------------------------------------------
 phase_plot(){
   mkdir -p "$EXPORT" "$FIGS"
@@ -94,9 +91,8 @@ phase_plot(){
   echo "   matplotlib PNG/PDF: $FIGS"
 }
 
-# appendix set (honest band A+T / combined non-IID / submarine timeline). Off by default.
+# appendix set (honest band A+T / combined non-IID / submarine timeline)
 #   pgfplots -> $EXPORT (menu all_figures_appendix.tex) ; matplotlib PNG twins -> $FIGS.
-#   app_* figure names never collide with the paper set, so EXPORT is shared.
 phase_appendix(){
   mkdir -p "$EXPORT" "$FIGS"
   echo ">>> APPENDIX FIGURES (pgfplots) -> $EXPORT   [dataset=$DATASET]"
@@ -106,20 +102,20 @@ phase_appendix(){
   echo "   pgfplots menu: $EXPORT/all_figures_appendix.tex  (\\input under your Appendix)"
 }
 
-# Food-101 -> APPENDIX. Food-101 reuses the CIFAR-100 family names and lives in its OWN
-# results dir, so it gets its OWN export folder (never clobbers the cifar100 paper .tex).
-# It re-runs the PAPER figure specs (timelines/table/fig4) on the food101 data, tagged food101.
-#   Overrides: FOOD_RES (results dir), FOOD_EXPORT (.tex/.dat), FOOD_FIGS (PNG).
+# Food-101 -> APPENDIX - make sure food-101 has it's own results dir
 phase_appendix_food(){
   local FRES="${FOOD_RES:-/food101}"
   local FEXPORT="${FOOD_EXPORT:-$FRES/export_food101}"
   local FFIGS="${FOOD_FIGS:-$FRES/figs_food101}"
   mkdir -p "$FEXPORT" "$FFIGS"
-  echo ">>> FOOD-101 appendix figures (pgfplots) -> $FEXPORT"
-  run "$TP --res '$FRES/*/result.json' --out '$FEXPORT' --tail $TAIL --dataset food101"
-  echo ">>> FOOD-101 appendix figures (matplotlib) -> $FFIGS"
-  run "$MP --res '$FRES/*/result.json' --out '$FFIGS' --tail $TAIL --dataset food101"
-  echo "   food101 menu: $FEXPORT/all_figures.tex  (\\input under your Appendix; keep in a separate folder)"
+  # --name-prefix food101_ + --dataset-label Food-101 
+  echo ">>> FOOD-101 paper-style figures (pgfplots) -> $FEXPORT"
+  run "$TP --res '$FRES/*/result.json' --out '$FEXPORT' --tail $TAIL --dataset food101 --name-prefix food101_ --dataset-label Food-101"
+  run "$MP --res '$FRES/*/result.json' --out '$FFIGS' --tail $TAIL --dataset food101 --name-prefix food101_ --dataset-label Food-101"
+  echo ">>> FOOD-101 appendix set (pgfplots + mpl) -> $FEXPORT / $FFIGS"
+  run "$TP --res '$FRES/*/result.json' --out '$FEXPORT' --tail $TAIL --appendix --dataset food101 --name-prefix food101_ --dataset-label Food-101"
+  run "$MP --res '$FRES/*/result.json' --out '$FFIGS' --tail $TAIL --appendix --dataset food101 --name-prefix food101_ --dataset-label Food-101"
+  echo "   food101 menu: $FEXPORT/all_figures.tex  (\\input under your Appendix; files are food101_*.tex)"
 }
 
 # ---------------------------------------------------------------------------
@@ -142,13 +138,12 @@ phase_plot_legacy(){
 
   # ===================== GROUP T -- honest-band generality (classes 40-49, 90-99) ==
   # Same honest-floor view as A1 but on other CIFAR-100 decades
-  # Every decade is its own 10-client / 10-class honest run; together they cover 0-99.
   TDECADES="T4_honest_c100_cls1019 T5_honest_c100_cls2029 T8_honest_c100_cls3039 T1_honest_c100_cls4049 T9_honest_c100_cls5059 T6_honest_c100_cls6069 T7_honest_c100_cls7079 T10_honest_c100_cls8089 T2_honest_c100_cls9099"
   for fam in $TDECADES; do
     run "$PL honest_lines     --in '$ALL' --family $fam --tail 20 --out $OUT/${fam}_class_floors"
     run "$PL honest_per_round --in '$ALL' --family $fam --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/${fam}_per_round"
   done
-  # MERGED honest-floor timeline across A1 + every decade run (scales to 100 classes).
+  # merged honest-floor timeline across A1 + every decade run (scales to 100 classes).
   ATFAMS="$HON $TDECADES"
   run "$PL honest_floors_all --in '$ALL' --families $ATFAMS --eta_tight $ETA_T --eta_loose $ETA_L --tail 20 --out $OUT/honest_floors_all"
   # Ranked per-class band (same data, sorted)
@@ -200,7 +195,7 @@ phase_plot_legacy(){
     run "$PL iso_pair --honest_in '$RES/E1_honest_niid_c100_rep*/result.json' --fr_in '$RES/E4_submarine_niid_c36_rep*/result.json' --class $cls --eta_tight $ETA_T_NIID --eta_loose $ETA_L_NIID --out $OUT/iso_E4_c${cls}"
   done
 
-  # ===== AMPLIFICATION PANEL: ROC + IID-vs-nonIID side-by-side + starvation + savings =====
+  # ===== ROC + IID-vs-nonIID side-by-side + starvation + savings =====
   # alpha axis: IID (K4) + non-IID random a=1.0/0.5/0.1 (+ fair EA3). One curve/bar per setting.
   AMP_FAMS="K4_alldyn_block2_c36 E4_submarine_niid_c36_a10 E4_submarine_niid_c36 E4_submarine_niid_c36_a01 EA3_submarine_niid_distrib_c36"
   # ROC / threshold-dilemma (honest pop = each family's own honest clients)
@@ -253,7 +248,7 @@ phase_plot_legacy(){
   run "$PL honest_per_round --in '$ALL' --family A0_nowm_honest_c100 --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/A0_nowm_per_round"
   run "$PL class_acc        --in '$ALL' --family A0_nowm_honest_c100 --out $OUT/A0_nowm_class_acc"
 
-  # ===================== GROUP Y -- ORACLE-THRESHOLD ablation (J4) ==========
+  # ===================== GROUP Y -- ORACLE-THRESHOLD (J4) ==========
   # J4 = the submarine handed the eta (0.264) instead of self-estimating it.
   # c36 => classes 3,6 ; c17 => classes 1,7
   for fam in J4_scope_graft_block2_c36 J4_scope_graft_block2_c17; do
@@ -263,9 +258,10 @@ phase_plot_legacy(){
     run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/timeline_${fam}"
   done
 
-  # ===================== GROUP L -- block-graft free-rider =================
+  # ===================== GROUP L -- head-only free-rider =================
   # reduced + last-layers-only
-  #   head2  scope = softmax fc + the conv layer just before it (last 5 tensors)
+  #   head2 scope = softmax fc + the conv layer just before it (last 5 tensors)
+  #   head scope = softmax fc (last 2 tensors)
   L_FAMS="L1_graftblock_head2_c36 L2_graftblock_block2_c36 L3_graftblock_head2_graft_c36 L4_graftblock_block2_graft_c36 L5_graftblock_head2_c17"
   for fam in $L_FAMS; do
     run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON --eta_tight $ETA_T --eta_loose $ETA_L --out $OUT/tap_perfr_${fam}"
@@ -282,19 +278,17 @@ phase_plot_legacy(){
   run "$PL savings_vs_alpha --in '$ALL' --families $L_FAMS --out $OUT/savings_graftblock"
 
   # ===================== GROUP F -- FedIPR backdoor (2nd output-layer scheme) ==
-  # Mirror of A(honest) + H(controls) + K(submarine) + L(graftblock) for the FedIPR
-  # c36 => free-riders on cids 3,6 (target labels 3,6) ; c17 => cids 1,7 (labels 1,7).
-
-  # -- honest baseline (calibration source + per-class floor) --
+  
+  # -- honest baseline --
   run "$PL honest_lines     --in '$ALL' --family $HON_FI --tail 20 --out $OUT/F_A1_class_floors"
   run "$PL honest_per_round --in '$ALL' --family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_A1_honest_per_round"
   run "$PL class_acc        --in '$ALL' --family $HON_FI --out $OUT/F_A0_class_acc"
 
-  # -- positive controls (must be CAUGHT: trigger acc ~ chance -> ber ~ 1) --
+  # -- positive controls --
   run "$PL timeline --in '$ALL' --family F_H5_prevmodel_c100_fi --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_H5_prevmodel_timeline"
   run "$PL timeline --in '$ALL' --family F_H6_gaussian_c100_fi  --honest_in '$ALL' --honest_family $HON_FI --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/F_H6_gaussian_timeline"
 
-  # -- submarine (K) + graftblock (L) attack families --
+  # -- submarine (K) + head-only (L) attack families --
   F_C36="F_K9_alldyn_head2_c36_fi F_K4_alldyn_block2_c36_fi F_L1_graftblock_head2_c36_fi"
   F_C17="F_K9_alldyn_head2_c17_fi F_K4_alldyn_block2_c17_fi F_L5_graftblock_head2_c17_fi"
   for fam in $F_C36 $F_C17; do
@@ -316,22 +310,19 @@ phase_plot_legacy(){
       run "$PL iso_pair --honest_in '$RES/${HON_FI}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --out $OUT/iso_${fam}_c${cls}"
     done
   done
-  # honest per-class band vs ALL FedIPR FR operating points on one axis (the money plot:
-  # FR BER sits inside the honest band -> no threshold separates them, same as FareMark).
+  # honest per-class band vs all FedIPR FR operating points on one axis
   FFR=""
   for fam in $F_C36 $F_C17; do FFR="$FFR '$RES/${fam}_rep*/result.json'"; done
   run "$PL overlap --in '$ALL' --families $HON_FI --fr_in $FFR --eta_tight $ETA_T_FI --eta_loose $ETA_L_FI --tail 20 --out $OUT/F_overlap_band_vs_fr"
 
-  # ===================== GROUP G -- FedIPR SIGN (3rd scheme, WHITE-BOX) =======
-  # Mirror of F for the feature-based sign watermark forced into the output layer.
-  # Same figures (BER is scheme-agnostic); chance = 0.5 like FareMark (NOT 1-1/C).
-  # -- honest baseline (calibration source + per-bit floor) --
+  # ===================== GROUP G -- FedIPR sign (3rd scheme, white-box) =======
+  # -- honest baseline --
   run "$PL honest_lines     --in '$ALL' --family $HON_WS --tail 20 --out $OUT/G_A1_class_floors"
   run "$PL honest_per_round --in '$ALL' --family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_A1_honest_per_round"
-  # -- positive controls (MUST be caught: sign ber ~ 0.5 chance) --
+  # -- positive controls --
   run "$PL timeline --in '$ALL' --family G_H5_prevmodel_c100_ws --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_H5_prevmodel_timeline"
   run "$PL timeline --in '$ALL' --family G_H6_gaussian_c100_ws  --honest_in '$ALL' --honest_family $HON_WS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/G_H6_gaussian_timeline"
-  # -- submarine (K) + graftblock (L) attack families --
+  # -- submarine (K) + head-only (L) attack families --
   G_C36="G_K9_alldyn_head2_c36_ws G_K4_alldyn_block2_c36_ws G_L1_graftblock_head2_c36_ws"
   G_C17="G_K9_alldyn_head2_c17_ws G_K4_alldyn_block2_c17_ws G_L5_graftblock_head2_c17_ws"
   for fam in $G_C36 $G_C17; do
@@ -353,7 +344,6 @@ phase_plot_legacy(){
       run "$PL iso_pair --honest_in '$RES/${HON_WS}_rep*/result.json' --fr_in '$RES/${fam}_rep*/result.json' --class $cls --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/iso_${fam}_c${cls}"
     done
   done
-  # the money plot: honest per-bit band vs ALL FedIPR-sign FR operating points on one axis.
   GFR=""
   for fam in $G_C36 $G_C17; do GFR="$GFR '$RES/${fam}_rep*/result.json'"; done
   run "$PL overlap --in '$ALL' --families $HON_WS --fr_in $GFR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_overlap_band_vs_fr"
@@ -371,7 +361,7 @@ phase_plot_legacy(){
     done
     GSWEEP_FR="$GSWEEP_FR '$RES/${FR_NL}_rep*/result.json'"
   done
-  # one axis: FR BER vs #layers (should rise from ~0 at NL=1 to caught at NL>1) vs the NL=1 honest floor.
+  # one axis: FR BER vs #layers 
   run "$PL overlap --in '$ALL' --families G_A1_honest_c100_ws_L1 --fr_in $GSWEEP_FR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_layers_overlap"
 
   echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box + layer sweep)"
@@ -384,15 +374,14 @@ case "${1:-help}" in
   plot)      phase_plot ;;
   paper)     phase_plot ;;        # alias: paper figures + table (pgfplots + mpl)
   appendix)  phase_appendix ;;    # appendix set: honest band (A+T), non-IID, submarine
-  appendix-food) phase_appendix_food ;;   # food-101 paper figs -> its own appendix export folder
+  appendix-food) phase_appendix_food ;;   # food-101 paper figs - own appendix export folder
   appendix-all)  phase_appendix; phase_appendix_food ;;
-  plot-legacy) phase_plot_legacy ;;   # dormant: old full matplotlib suite
+  plot-legacy) phase_plot_legacy ;;   # legacy
   all-submit) phase_manifest; phase_submit ;;   # 1 -> 2
   *)
     cat <<USAGE
 runbook.sh -- run phases 
 
-  ON THE CLUSTER (has submit_experiment.sh + .env):
     ./runbook.sh manifest    1. build jobs.tsv     (BATCH=$BATCH)
     ./runbook.sh submit      2. run the pool       (PODS=$PODS WORKERS=$WORKERS)
        ... wait for jobs to finish ...
@@ -401,7 +390,7 @@ runbook.sh -- run phases
     RES=~/local/results ./runbook.sh plot     4. PAPER figures+table -> pgfplots (export/)
     RES=~/local/results ./runbook.sh appendix      4b. appendix set (band A+T, non-IID, submarine)
     FOOD_RES=~/local/results/food101 ./runbook.sh appendix-food   4c. food-101 figs -> appendix
-    (appendix-all = both; plot-legacy = the old full matplotlib PNG suite, dormant)
+    (appendix-all = both; plot-legacy = old legacy plots)
 
   batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD .
 USAGE

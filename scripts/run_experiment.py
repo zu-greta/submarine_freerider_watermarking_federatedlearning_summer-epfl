@@ -4,10 +4,6 @@
     python -u scripts/run_experiment.py \
         --config_idx 14 --repeat 0 --device cuda \
         --output_dir /path/out --data_root /path/data
-
-Runs one (config, repeat); writes result.json to --output_dir.
-result.json carries "manifest" (self-describing metadata), "compute" (per-client
-effort), and "history" (per-round metrics incl. wm_per_client BER lists).
 """
 import argparse
 import json
@@ -47,16 +43,14 @@ def parse_args():
     p.add_argument("--data_root", type=str, default=None)
     p.add_argument("--num_workers", type=int, default=2)
     p.add_argument("--fast_data", action="store_true",
-                   help="use GPU-resident FastLoaders (removes DataLoader fork storms).")
+                   help="use GPU-resident FastLoaders")
     p.add_argument("--no_determinism", action="store_true",
                    help="disable cuDNN determinism + enable autotuner (~1.3-2x, "
                         "statistically identical over seeds).")
     # ---- general overrides ----
     p.add_argument("--rounds", type=int, default=None)
     p.add_argument("--num_clients", type=int, default=None,
-                   help="override client count. num_clients > num_classes forces "
-                        "clients to SHARE trigger classes (paper capacity/Table IX; "
-                        "makes same-class non-separability systemic).")
+                   help="override client count")
     p.add_argument("--model", type=str, default=None)
     p.add_argument("--dataset", type=str, default=None)
     p.add_argument("--local_epochs", type=int, default=None)
@@ -103,11 +97,10 @@ def parse_args():
     p.add_argument("--fedipr_target_mode", type=str, default=None,
                    choices=["cid", "fixed", "random"],
                    help="FedIPR trigger target label: cid (cid%%n), fixed (=5), random.")
-    # ---- FedIPR feature-based SIGN watermark (WHITE-BOX, 1+ normalization layers) ----
+    # ---- FedIPR feature-based sign watermark (WHITE-BOX, 1+ normalization layers) ----
     p.add_argument("--fedipr_sign_layers", type=int, default=None,
-                   help="fedipr_sign: how many normalization layers carry the mark (server "
-                        "choice). 1 = output layer only (fragile); >1 spreads into the body "
-                        "and beats the head2 free-rider.")
+                   help="fedipr_sign: num normalization layers carry the mark (server "
+                        "choice). 1 = output layer only (fragile); >1 spreads into the body")
     p.add_argument("--fedipr_sign_bits", type=int, default=None,
                    help="fedipr_sign: bits PER carrier layer (auto-clamped to channels//K).")
     p.add_argument("--fedipr_sign_margin", type=float, default=None,
@@ -120,7 +113,7 @@ def parse_args():
     p.add_argument("--wm_bits", type=int, default=None)
     p.add_argument("--wm_balanced_keys", dest="wm_balanced_keys",
                    action="store_true", default=None,
-                   help="sign-balanced key rows (removes unembeddable-bit artifact, STATUS F6).")
+                   help="sign-balanced key rows")
     p.add_argument("--no_wm_balanced_keys", dest="wm_balanced_keys", action="store_false")
     p.add_argument("--wm_trigger_assign", type=str, default=None,
                    choices=["roundrobin", "distribution"],
@@ -137,10 +130,7 @@ def parse_args():
     p.add_argument("--wm_num_triggers", type=int, default=None)
     p.add_argument("--wm_trigger_mode", type=str, default=None,
                    choices=["class", "client", "client_train"],
-                   help="verifier trigger images: class=shared held-out bank per class; "
-                        "client=per-client disjoint held-out slice (paper V-F3); "
-                        "client_train=per-client images from its own training shard "
-                        "(paper V-F3 trigger-sample consistency).")
+                   help="verifier trigger images: class=shared held-out bank per class")
     p.add_argument("--wm_lambda", type=float, default=None)
     p.add_argument("--wm_beta", type=float, default=None)
     p.add_argument("--wm_eta_floor", type=float, default=None)
@@ -283,8 +273,6 @@ def collect_compute(clients, free_rider_indices):
         "honest_mean_samples": hm_s, "fr_mean_samples": fm_s,
         "effort_ratio_gpu": round(fm_gpu / hm_gpu, 4) if hm_gpu else None,
         "effort_ratio_samples": round(fm_s / hm_s, 4) if hm_s else None,
-        # provenance so plots can warn: gpu_ms absolute values are only clean at concurrency 1;
-        # the ratio is valid at any concurrency
         "gpu_concurrency": concurrency,
         "gpu_ms_abs_reliable": concurrency <= 1,
     }
@@ -333,8 +321,6 @@ def main():
     if args.fast_data:
         data = wrap_build_data(data, cfg.dataset, cfg.batch_size, seed, device)
 
-    # shard sizes: cheap to read, and the fastest way to spot a pathological
-    # non-IID split (a client holding no images of its own trigger class)
     try:
         shard_sizes = [len(l.dataset) for l in data.client_loaders]
     except Exception:
@@ -366,14 +352,12 @@ def main():
         classes = sorted({e["trigger_class"] for e in registry.entries.values()})
         scheme = str(getattr(cfg, "wm_scheme", "faremark"))
         if scheme == "fedipr":
-            # FedIPR verifier reads each client's registered trigger set directly;
-            # no shared/per-client test-image bank is needed.
+            # FedIPR verifier reads each client's registered trigger set directly
             tmode = "fedipr_backdoor"
             per_client_bank = False
             trigger_bank = {}
         elif scheme == "fedipr_sign":
-            # WHITE-BOX: the verifier reads the carrier scale straight from the
-            # submitted weights; no trigger images / bank at all.
+            # WHITE-BOX: the verifier reads the carrier scale from weights
             tmode = "fedipr_sign_wb"
             per_client_bank = False
             trigger_bank = {}
@@ -381,18 +365,16 @@ def main():
             tmode = getattr(cfg, "wm_trigger_mode", "class")
             per_client_bank = (tmode != "class")
             if tmode == "client_train":
-                # paper V-F3 trigger-sample consistency: verify on the client's own train imgs
                 trigger_bank = build_trigger_bank_from_train(
                     data.client_loaders, registry, cfg.wm_num_triggers)
             elif tmode == "client":
-                # paper V-F3 client-specific trigger variations, held-out
                 trigger_bank = build_trigger_bank_per_client(
                     data.test_dataset, registry, cfg.wm_num_triggers, seed=seed)
             else:
                 trigger_bank = build_trigger_bank(data.test_dataset, classes,
                                                   cfg.wm_num_triggers, seed=seed)
         n_clients_wm = len(registry.entries)
-        # clients-per-trigger-class: >1 means oversubscription (paper Table IX capacity regime)
+        # clients-per-trigger-class: >1 means oversubscription 
         cpc = {}
         for e in registry.entries.values():
             cpc[e["trigger_class"]] = cpc.get(e["trigger_class"], 0) + 1

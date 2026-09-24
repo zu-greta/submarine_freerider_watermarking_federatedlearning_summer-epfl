@@ -1,20 +1,6 @@
 #!/usr/bin/env python3
 # =============================================================================
-# paper_figs_mpl.py -- matplotlib twins of the PAPER figures (the same set
-# to_pgfplots.py emits for Overleaf), rendered as PNG+PDF.
-#
-#   fig1_*_timeline   honest floor vs OUR free-rider, BER vs round (+-s.d. seeds)
-#                       variants: faremark / fedipr / sign(white-box)
-#   fig2_*_attack     honest floor + prev-model / gaussian / ours, BER vs round
-#                       variants: faremark / sign(white-box)
-#   fig3              class difficulty: grouped honest/FR bars + DeltaBER-vs-entropy
-#                       scatter (the "before" look)
-#   fig4_layers       white-box: final BER vs # watermarked layers, honest vs FR
-#   tab1_costs        honest vs FR samples + GPU-time, both schemes -> .csv + .png
-#
-# Same result.json tree as to_pgfplots.py; families kept in lock-step with it.
-# Missing families are skipped (so it runs on a partial results dir).
-# All stats are over SEEDS (tail-mean per seed, then mean/std over seeds).
+# paper_figs_mpl.py -- matplotlib rendered as PNG+PDF.
 #
 #   python paper_figs_mpl.py --res 'results/*/result.json' --out figs --tail 20
 #   python paper_figs_mpl.py --res '...' --out figs --only fig1_sign_timeline
@@ -26,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import to_pgfplots as TP     # shared appendix stats -> identical numbers in PNG and Overleaf
+import to_pgfplots as TP     # shared appendix stats 
 
 # ---- Okabe-Ito palette (identical hues to to_pgfplots COLORDEF) -------------
 C_HONEST = "#0072B2"   # blue   -> honest floor
@@ -51,8 +37,7 @@ def _dataset_of(r):
 
 
 def load(res_glob, dataset=None):
-    """Group by family; if `dataset` is set, keep only that dataset's runs. Food-101
-    reuses the CIFAR-100 family names, so without this a mixed folder merges datasets."""
+    """Group by family"""
     runs = defaultdict(list)
     seen = defaultdict(set)
     for f in sorted(glob.glob(res_glob)):
@@ -70,7 +55,7 @@ def load(res_glob, dataset=None):
     if not dataset:
         mixed = sorted(fam for fam, dss in seen.items() if len({d for d in dss if d}) > 1)
         if mixed:
-            print("  [WARN] families span >1 dataset and will be MERGED "
+            print("  [WARN] families span >1 dataset and will be merged "
                   "(pass --dataset to separate): " + ", ".join(mixed))
     return runs
 
@@ -133,11 +118,11 @@ def compute_col(runs, key):
 
 def _save(fig, out, name):
     os.makedirs(out, exist_ok=True)
-    for ext in ("png",):            # PNG only -- PDF output disabled ("pdf" removed)
+    for ext in ("png",):            # PNG only 
         fig.savefig(os.path.join(out, f"{name}.{ext}"), bbox_inches="tight")
     plt.close(fig)
     print(f"  wrote {name}.png")
-    return True                     # signal "produced" so main() prints the seed report
+    return True                    
 
 def _band(ax, rounds, mean, sd, color, label, marker=None):
     lo = [max(0.0, m - s) for m, s in zip(mean, sd)]
@@ -146,7 +131,7 @@ def _band(ax, rounds, mean, sd, color, label, marker=None):
     ax.plot(rounds, mean, color=color, lw=1.8, marker=marker, ms=3, label=label)
 
 # ============================================================================
-# fig1: honest floor vs OUR free-rider timeline
+# fig1: honest floor vs our free-rider timeline
 # ============================================================================
 def fig_timeline(spec, runs, out, tail):
     fr = runs.get(spec["fr"])
@@ -158,15 +143,13 @@ def fig_timeline(spec, runs, out, tail):
         print(f"  skip {spec['name']} (no history)"); return
     fm = [_ms(frR.get(rd, [])) for rd in rounds]; bm = [_ms(benR.get(rd, [])) for rd in rounds]
     fig, ax = plt.subplots(figsize=(6.2, 3.4))
-    # free-rider drawn FIRST (underneath), honest band+line LAST (on top) so honest is never
-    # hidden behind the FR fill -- matches the Overleaf timeline. Grey tail-highlight removed.
     _band(ax, rounds, [m for m, s in fm], [s for m, s in fm], C_FR, "free-rider", marker="o")
     _band(ax, rounds, [m for m, s in bm], [s for m, s in bm], C_HONEST, "honest floor")
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
-    ax.set_ylim(0, spec.get("ymax", 0.6)); ax.grid(axis="x", visible=False)   # zoom BER axis (matches overleaf)
+    ax.set_ylim(0, spec.get("ymax", 0.6)); ax.grid(axis="x", visible=False)   
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
     h, l = ax.get_legend_handles_labels()
-    order = sorted(range(len(l)), key=lambda i: 0 if "honest" in l[i] else 1)   # honest floor listed first
+    order = sorted(range(len(l)), key=lambda i: 0 if "honest" in l[i] else 1)  
     ax.legend([h[i] for i in order], [l[i] for i in order], fontsize=10, loc="upper right")
     ax.set_title(spec.get("title", ""), fontsize=11)
     return _save(fig, out, spec["name"])
@@ -185,10 +168,8 @@ def fig_attack(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 def _draw_attack(ax, spec, runs, present):
-    """honest floor band + one band/line per present attack family (shared by fig2 and the
-    non-IID appendix panel a)."""
+    """honest floor band + one band/line per present attack family"""
     hon = runs.get(spec["honest"])
-    # honest floor: prefer the dedicated honest family, else benign clients of first attack
     if hon:
         benR = per_round(hon, "wm_benign_ber")
     else:
@@ -208,13 +189,13 @@ def _draw_attack(ax, spec, runs, present):
         col, mk = style.get(lbl, cycle[i % len(cycle)])
         ms = [_ms(fR[rd]) for rd in rr]
         _band(ax, rr, [m for m, s in ms], [s for m, s in ms], col, lbl, marker=mk)
-    # -- threshold lines disabled for now (commented out) --
+    # -- threshold lines disabled for now --
     # if spec.get("eta_t") is not None:
     #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1, zorder=1)
     # if spec.get("eta_l") is not None:
     #     ax.axhline(spec["eta_l"], color=C_HONEST, ls=(0, (5, 2)), lw=1, zorder=1)
     ax.set_xlabel("communication round"); ax.set_ylabel("watermark BER")
-    ax.set_ylim(0, spec.get("ymax", 0.8)); ax.grid(axis="x", visible=False)   # zoom BER axis (matches overleaf; baselines ~0.5-0.75 stay in frame)
+    ax.set_ylim(0, spec.get("ymax", 0.8)); ax.grid(axis="x", visible=False)   
     ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False)
 
 # ============================================================================
@@ -283,7 +264,7 @@ def fig_layers(spec, runs, out, tail):
                 marker="o", ms=5, lw=1.8, capsize=3, label="free-rider (ours)")
     ax.errorbar(nls, [r[3] for r in rows], yerr=[r[4] for r in rows], color=C_HONEST,
                 marker="s", ms=5, lw=1.8, capsize=3, label="honest")
-    # -- threshold lines disabled for now (commented out) --
+    # -- threshold lines disabled for now --
     # if spec.get("eta_t") is not None:
     #     ax.axhline(spec["eta_t"], color=C_PREV, ls="--", lw=1); ax.text(nls[-1], spec["eta_t"], r" $\eta_t$", fontsize=10, va="bottom", ha="right")
     # if spec.get("eta_l") is not None:
@@ -331,7 +312,7 @@ def fig_costlayers(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 # ============================================================================
-# fig4 MERGED: detection (fixed FR BER) + evasion (adaptive FR BER) + cost (adaptive FR compute)
+# fig4: detection (fixed FR BER) + evasion (adaptive FR BER) + cost (adaptive FR compute)
 # ============================================================================
 def fig_costdetect(spec, runs, out, tail):
     def final_ber(fam):
@@ -345,13 +326,13 @@ def fig_costdetect(spec, runs, out, tail):
                 for r in runs.get(fam, [])]
         vals = [float(v) for v in vals if v is not None]
         return _ms(vals), len(vals)
-    C_FULL = "#CC79A7"   # full-data adaptive cost (folded-in fig4c)
+    C_FULL = "#CC79A7"   # full-data adaptive cost 
     rows = []
     for nl in spec["layers"]:
         (dm, ds), nd = final_ber(spec["fixed_fmt"].format(nl=nl))
         (am, asd), na = final_ber(spec["adapt_fmt"].format(nl=nl))
         (cm, cs), nc = cost(spec["adapt_fmt"].format(nl=nl))         # reduced-shard cost
-        (fm, fs), nf = cost(spec["full_fmt"].format(nl=nl))          # full-data cost (old fig4c)
+        (fm, fs), nf = cost(spec["full_fmt"].format(nl=nl))          # full-data cost
         if nd == 0 and na == 0 and nc == 0 and nf == 0:
             continue
         rows.append((nl, dm, ds, am, asd, cm, cs, fm, fs))
@@ -378,7 +359,7 @@ def fig_costdetect(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 # ============================================================================
-# appendix: pooled honest per-class BER band (A + T groups -> all 100 classes)
+# appendix: pooled honest per-class BER band (A + T groups -> classes)
 # ============================================================================
 def fig_band(spec, runs, out, tail):
     fams = spec.get("families") or ([spec["family"]] if spec.get("family") else [])
@@ -411,7 +392,6 @@ def fig_band(spec, runs, out, tail):
 
 # ============================================================================
 # APPENDIX (v2) -- twins of to_pgfplots emit_classrank / emit_niidalpha / emit_submarine
-#   (stats come from to_pgfplots so the numbers are identical)
 # ============================================================================
 PGF_HEX = {"chonest": "#0072B2", "cfr": "#D55E00", "cacc": "#009E73", "cfull": "#CC79A7",
            "cyel": "#E69F00", "csky": "#56B4E9", "cprev": "#000000", "cgrey": "#999999"}
@@ -522,14 +502,40 @@ def fig_submarine(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 # ============================================================================
-# tab1: cost table -> CSV + rendered PNG
+# appendix ROC
+# ============================================================================
+def fig_roc(spec, runs, out, tail):
+    s = TP.roc_stats(runs, spec.get("honest", []), spec.get("fr", []), tail,
+                     spec.get("fpr_budget", 0.05))
+    if s is None:
+        print(f"  skip {spec['name']} (need honest + FR per-client BER)"); return
+    fpr = [p[0] for p in s["roc"]]; tpr = [p[1] for p in s["roc"]]
+    b = s["fpr_budget"]; opf, opt = s["op"]
+    fig, ax = plt.subplots(figsize=(4.8, 4.4))
+    ax.axvspan(0, b, color=C_PREV, alpha=0.06)
+    ax.text(b, 0.02, f" FPR ≤ {b*100:.0f}%", color="#555555", fontsize=8, va="bottom", ha="left")
+    ax.plot([0, 1], [0, 1], ls="--", color="#999999", lw=1, label="chance (AUC 0.5)")
+    ax.plot(fpr, tpr, color=C_FR, lw=2, marker="o", ms=2.5, label=f"BER threshold (AUC {s['auc']:.2f})")
+    ax.plot([opf], [opt], "o", mfc="none", mec=C_PREV, ms=7)
+    ax.annotate(f"{opt*100:.0f}% TPR", (opf, opt), xytext=(5, -2), textcoords="offset points", fontsize=8)
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
+    ax.set_xlabel("false-positive rate (honest flagged)")
+    ax.set_ylabel("true-positive rate (FR detected)")
+    ax.grid(True); _clean(ax); ax.legend(fontsize=8, loc="lower right")
+    ax.set_title(spec.get("title", f"ROC: no threshold separates them (AUC {s['auc']:.2f})"), fontsize=10)
+    print(f"    ROC: n_neg={s['n_neg']} n_pos={s['n_pos']} AUC={s['auc']:.3f} "
+          f"TPR@{b*100:.0f}%FPR={opt*100:.0f}%")
+    return _save(fig, out, spec["name"])
+
+# ============================================================================
+# tab1: cost table -> CSV + PNG
 # ============================================================================
 def tab_costs(spec, runs, out, tail):
     os.makedirs(out, exist_ok=True)
     header = ["scheme", "client", "samples", "samples_sd", "gpu_s", "gpu_s_sd", "cost_over_honest"]
     csv_rows, tbl_rows, any_ok = [], [], False
     for label, fam in spec["rows"]:
-        fams = fam if isinstance(fam, (list, tuple)) else [fam]   # a list pools+averages its seeds (e.g. FareMark easy+hard)
+        fams = fam if isinstance(fam, (list, tuple)) else [fam]   # a list pools+averages its seeds 
         rr = [r for f in fams for r in runs.get(f, [])]
         if not rr:
             continue
@@ -560,9 +566,8 @@ def tab_costs(spec, runs, out, tail):
     return _save(fig, out, spec["name"])
 
 # ============================================================================
-# figure registry -- families kept in lock-step with to_pgfplots.py
+# figure registry 
 # ============================================================================
-# NOTE: kept in lock-step with to_pgfplots.py 
 FIGS = [
     # ---- FareMark (box-free) -- HEAD-only free-rider ----
     dict(name="fig1_faremark_timeline_head", kind="timeline", fr="L6_graftblock_head_c36",
@@ -572,7 +577,7 @@ FIGS = [
     # ---- FedIPR white-box sign -- HEAD2 free-rider ----
     dict(name="fig1_sign_timeline", kind="timeline", fr="G_L1_graftblock_head2_c36_ws",
          eta_t=0.20, eta_l=0.50, title="FedIPR white-box sign (head2): honest vs free-rider"),
-    # ---- ONE merged cost table (FareMark head avg L6+L7, sign head2 G_L1) ----
+    # ---- merged cost table (FareMark head avg L6+L7, sign head2 G_L1) ----
     dict(name="tab1_costs", kind="costtable",
          rows=[("FareMark (head)", ["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
                ("FedIPR-sign (head2)", ["G_L1_graftblock_head2_c36_ws"])]),
@@ -588,14 +593,14 @@ FIGS = [
     # ---- FareMark class difficulty (combined bars + entropy scatter twin), head families ----
     dict(name="fig3_class_difficulty", kind="classdiff",
          honest="A1_honest_c100", fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17"]),
-    # ---- white-box layer sweeps: MERGED detection+cost (fig4) + full-data cost (fig4c) ----
+    # ---- white-box layer sweeps: merged detection+cost (fig4) + full-data cost (fig4c) ----
     dict(name="fig4_detect_cost", kind="costdetect",
          fixed_fmt="G_L1_graftblock_head2_c36_ws_L{nl}", adapt_fmt="G_Ladapt_c36_ws_L{nl}",
          full_fmt="G_Lfull_c36_ws_L{nl}", layers=[1, 6, 20],   # fig4c folded in as the full-data cost line
          title="White-box: caught cheap, or it pays the honest cost"),
 ]
 
-# appendix twins (rendered with --appendix) -- kept in lock-step with to_pgfplots APPENDIX_FIGURES
+# appendix (rendered with --appendix) 
 APPENDIX_FIGS = [
     dict(name="app_faremark_class_band", kind="classrank", n_label=3,
          families=["A1_honest_c100",
@@ -615,15 +620,26 @@ APPENDIX_FIGS = [
          attacks=[("easy 1,7", "K9_alldyn_head2_c17"),
                   ("hard 3,6", "K9_alldyn_head2_c36")],
          eta_t=0.064, eta_l=0.264),
+    dict(name="app_roc_faremark", kind="roc", fpr_budget=0.05,
+         honest=["A1_honest_c100",
+                 "T4_honest_c100_cls1019", "T5_honest_c100_cls2029", "T8_honest_c100_cls3039",
+                 "T1_honest_c100_cls4049", "T9_honest_c100_cls5059", "T6_honest_c100_cls6069",
+                 "T7_honest_c100_cls7079", "T10_honest_c100_cls8089", "T2_honest_c100_cls9099"],
+         fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17",
+             "A2_reduced_c100_c17", "A3_reduced_c100_c36",
+             "K9_alldyn_head2_c17", "K9_alldyn_head2_c36",
+             "K4_alldyn_block2_c17", "K4_alldyn_block2_c36"],
+         title="faremark: ROC honest vs FR threshold"),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
         "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs,
         "costdetect": fig_costdetect, "band": fig_band,
-        "classrank": fig_classrank, "niidalpha": fig_niidalpha, "submarine": fig_submarine}
+        "classrank": fig_classrank, "niidalpha": fig_niidalpha, "submarine": fig_submarine,
+        "roc": fig_roc}
 
 
 # ============================================================================
-# per-figure seed / source-file report (so you can confirm ALL seeds were read)
+# per-figure seed / source-file report 
 # ============================================================================
 def _spec_families(spec):
     """The result families a figure pulls from (used only for the report)."""
@@ -652,6 +668,8 @@ def _spec_families(spec):
         return list(dict.fromkeys(fams))
     if k == "submarine":
         return [spec["honest"]] + [f for _, f in spec["attacks"]]
+    if k == "roc":
+        return list(spec.get("honest", [])) + list(spec.get("fr", []))
     if k == "costtable":
         out = []
         for _, fam in spec["rows"]:
@@ -695,6 +713,11 @@ def main():
                          "when a results folder mixes datasets (families are shared).")
     ap.add_argument("--appendix", action="store_true",
                     help="render the APPENDIX_FIGS set instead of the paper set.")
+    ap.add_argument("--name-prefix", default="", dest="name_prefix",
+                    help="prepend to every PNG filename so a second dataset (e.g. Food-101) does not "
+                         "overwrite the CIFAR-100 PNGs. E.g. --name-prefix food101_")
+    ap.add_argument("--dataset-label", default=None, dest="dataset_label",
+                    help="rewrite 'CIFAR-100' in titles to this (e.g. 'Food-101').")
     a = ap.parse_args()
     runs = load(a.res, a.dataset)
     print(f"loaded families: {sorted(runs)}")
@@ -704,9 +727,15 @@ def main():
     for spec in figset:
         if only and spec["name"] not in only:
             continue
-        produced = EMIT[spec["kind"]](spec, runs, a.out, a.tail)   # emitters now return True when a png was written
-        if produced:                                               # only report for figures that were actually made
-            _report(spec, runs)                                    # print seed count + which result.json files fed it
+        s = spec
+        if a.name_prefix or a.dataset_label:
+            title = spec.get("title", "")
+            if a.dataset_label:
+                title = title.replace("CIFAR-100", a.dataset_label).replace("cifar100", a.dataset_label)
+            s = dict(spec, name=a.name_prefix + spec["name"], title=title)
+        produced = EMIT[s["kind"]](s, runs, a.out, a.tail)         
+        if produced:                                               
+            _report(spec, runs)                                  
 
 if __name__ == "__main__":
     main()

@@ -35,15 +35,13 @@ class WatermarkRegistry:
 
     def register(self, cid, trigger_class, key, target_bits, kind="power",
                  alpha=0.4, exclude="trigger"):
-        # exclude: which projection column the verifier drops
         exc = trigger_class if exclude == "trigger" else exclude
         self.entries[cid] = dict(trigger_class=trigger_class, key=key,
                                  target_bits=target_bits, kind=kind, alpha=alpha,
                                  exclude=exc)
 
     def register_fedipr(self, cid, target_label, trig_x, trig_y):
-        """FedIPR backdoor entry: the client's private trigger set + its secret
-        target label. `trigger_class` holds the target label """
+        """FedIPR backdoor"""
         self.scheme = "fedipr"
         self.entries[cid] = dict(trigger_class=int(target_label), kind="fedipr",
                                  alpha=None, exclude=None,
@@ -52,8 +50,7 @@ class WatermarkRegistry:
                                  key=None, target_bits=None)
 
     def register_fedipr_sign(self, cid, trigger_class, sign_E, sign_bits, carriers):
-        """FedIPR feature-based sign entry (white box): the client's per-carrier secret
-        matrices E_k (list), target bits B_k (list), + the ordered list of carrier scale param names"""
+        """FedIPR feature-based white-box"""
         self.scheme = "fedipr_sign"
         self.entries[cid] = dict(trigger_class=int(trigger_class), kind="fedipr_sign",
                                  alpha=None, exclude=None,

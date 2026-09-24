@@ -10,7 +10,7 @@ from dataclasses import MISSING as _MISSING_SENTINEL, fields as _dc_fields
 
 
 class _MISSING:
-    """Marker type for dataclass fields that have no default (required fields)."""
+    """Marker type for dataclass fields that have no default"""
 
 
 def _is_missing(v):

@@ -36,7 +36,7 @@ import numpy as np
 
 SCHEMA_VERSION = 2
 
-# tail=20 -> last 20 of 50 rounds = the converged region (paper Fig. 8 saturates ~round 30)
+# tail=20 -> last 20 of 50 rounds (converged region)
 DEFAULT_TAIL = 20
 
 
@@ -46,7 +46,6 @@ def load(globs, with_path=True):
 
     with_path=True  -> [(path, run), ...]   
     with_path=False -> [run, ...]          
-    Unreadable files are skipped with a note rather than killing the run.
     """
     out = []
     for g in (globs if isinstance(globs, (list, tuple)) else [globs]):
@@ -88,10 +87,7 @@ def is_honest_run(run) -> bool:
 
 
 def select(runs, family=None, honest=None):
-    """Filter loaded runs by manifest family and/or honest-ness.
-
-    Accepts either the (path, run) or the bare-run list shape and returns the
-    same shape it was given.
+    """Filter loaded runs by manifest family and/or honest
     """
     def _run(x):
         return x[1] if isinstance(x, tuple) else x
@@ -136,7 +132,7 @@ def per_client_bers(runs, tail=DEFAULT_TAIL, free_rider=False, trigger_class=Non
 
 
 def per_client_ber_pairs(runs, tail=DEFAULT_TAIL, free_rider=False):
-    """(trigger_class, ber) pairs -- the per-class flavour separability.py needs"""
+    """(trigger_class, ber) pairs"""
     out = []
     for r in runs_only(runs):
         for h in history(r, tail):
@@ -147,10 +143,7 @@ def per_client_ber_pairs(runs, tail=DEFAULT_TAIL, free_rider=False):
 
 
 def round_means(runs, tail=DEFAULT_TAIL, honest_only=True):
-    """m_r = mean BER over clients within a round, pooled across runs.
-
-    This is the quantity the live eta is built on. Its spread is ~sigma/sqrt(N)
-    because it averages over clients first
+    """m_r = mean BER over clients within a round, pooled across runs
     """
     ms = []
     for r in runs_only(runs):
@@ -164,7 +157,7 @@ def round_means(runs, tail=DEFAULT_TAIL, honest_only=True):
 
 
 def bers_by_class(runs, tail=DEFAULT_TAIL, free_rider=False):
-    """{trigger_class: [ber, ...]} -- the per-class floor."""
+    """{trigger_class: [ber, ...]} -- the per-class floor"""
     out = {}
     for r in runs_only(runs):
         for h in history(r, tail):
@@ -178,7 +171,6 @@ def bers_by_class(runs, tail=DEFAULT_TAIL, free_rider=False):
 
 
 def trigger_classes(run):
-    """Observed trigger classes, and how many clients share each one"""
     h = run.get("history", []) or []
     if not h:
         return {}
@@ -191,7 +183,6 @@ def trigger_classes(run):
 
 # --------------------------------------------------------- attacker schedule
 def _calib_tagged_rounds(run):
-    """Rounds a free-rider tagged 'calib' in its trace (authoritative window)"""
     tagged = set()
     for c in ((run.get("compute", {}) or {}).get("per_client", {}) or {}).values():
         if c.get("is_free_rider"):
@@ -202,7 +193,7 @@ def _calib_tagged_rounds(run):
 
 
 def calib_window(run):
-    """[lo, hi] calibration rounds -- used to shade plots"""
+    """[lo, hi] calibration rounds"""
     tagged = _calib_tagged_rounds(run)
     if tagged:
         return min(tagged), max(tagged)
@@ -228,7 +219,7 @@ def summary_of(run) -> dict:
     s = run.get("summary")
     if isinstance(s, dict) and s:
         return s
-    # ---- v1 fallback: reassemble from the old flat top level ----
+    # ---- v1 fallback ----
     return {
         "family": family(run),
         "seed": run.get("seed"),

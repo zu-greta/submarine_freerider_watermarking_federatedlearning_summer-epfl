@@ -73,7 +73,7 @@ class ExpConfig:
     fedipr_trigger_source: str = "indist"   # "indist" (real task imgs, BN-robust; default) | "svhn"/"noise" (OOD) | "folder"
     fedipr_trigger_dir: str = ""            # image folder when fedipr_trigger_source="folder"
     fedipr_target_mode: str = "cid"         # target label: "cid" (cid%%n) | "fixed" (=5) | "random"
-    # ---- TODO test: FedIPR feature-based sign watermark knobs (wm_scheme="fedipr_sign", WHITE-BOX) ----
+    # ---- FedIPR feature-based sign watermark knobs (wm_scheme="fedipr_sign", WHITE-BOX) ----
     # The sign string is embedded in the signs of one + normalization scale vectors. read from weights
     #   fedipr_sign_layers = 1  -> output layer only 
     #   fedipr_sign_layers = N  -> the N output-most normalization scales

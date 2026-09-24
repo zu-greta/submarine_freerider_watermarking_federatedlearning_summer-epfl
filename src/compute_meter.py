@@ -12,7 +12,6 @@ accumulates per round and in total
   * trained                 : bool - if client trained this round (or coasted / free-rode)
 
 Cluster note: on the RunAI A100 the meaningful cost unit is GPU-seconds, so `gpu_ms` is measured with CUDA events 
-(accurate for the GPU stream), not just Python wall time. 
 `samples`/`passes`/`flops` are device-independent and deterministic.
 CUDA-event timing is used only when torch+CUDA are present, otherwise it falls back to perf_counter.
 """

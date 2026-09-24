@@ -6,7 +6,6 @@ set -euo pipefail
 #     ./submit_experiment.sh [CONFIG_IDX] [REPEAT]
 #     ./submit_experiment.sh 14 0                       # submarine, seed 0
 #     ATTACK=none FAMILY=t1_all_honest ./submit_experiment.sh 14 0
-#  Set DEBUG_HOLD=1 to keep the pod alive 1h after the run for inspection.
 # ===================================================
 # RUNAI_EXTRA: extra flags appended verbatim to `runai submit`
 # NOTE: so far A100-80 have been used for experiments
@@ -15,7 +14,7 @@ CONFIG_IDX="${1:-0}"
 REPEAT="${2:-0}"
 DEBUG_HOLD="${DEBUG_HOLD:-0}"
 
-DRYRUN="${DRYRUN:-0}"                      # 1 = emit a manifest line, submit nothing
+DRYRUN="${DRYRUN:-0}"                      # 1 = manifest
 JOBS_FILE="${JOBS_FILE:-jobs.tsv}"         # where DRYRUN appends
 
 if [ -f .env ]; then set -a; source .env; set +a
@@ -24,7 +23,7 @@ elif [ "$DRYRUN" != "1" ]; then echo "Error: .env file not found!"; exit 1; fi
 [ "$DRYRUN" = "1" ] || \
   echo "=== env: PROJECT=$PROJECT IMAGE=$IMAGE PVC=$PVC MOUNT=$MOUNT NAMESPACE=$NAMESPACE ==="
 
-GIT_REPO="https://github.com/zu-greta/submarine_freerider_watermarking_federatedlearning_summer-epfl.git"
+GIT_REPO=$REPO
 GIT_BRANCH="main"
 SCRIPT="${SCRIPT:-scripts/run_experiment.py}"
 
@@ -139,13 +138,12 @@ fi
 # Per-dataset results subtree 
 DS_FROM_PY="$(printf '%s' "$PY_EXTRA" | sed -n 's/.*--dataset \([^ ]*\).*/\1/p')"
 DATASET="${DS_FROM_PY:-${DATASET:-cifar100}}"
-# cifar100 keeps the original flat path
 if [ "$DATASET" = "cifar100" ]; then
-  OUTPUT_DIR="${MOUNT}/home/zu/results/${RUN_TAG}"
+  OUTPUT_DIR="${MOUNT}${RESULTDIR}/${RUN_TAG}"
 else
-  OUTPUT_DIR="${MOUNT}/home/zu/results/${DATASET}/${RUN_TAG}"
+  OUTPUT_DIR="${MOUNT}${RESULTDIR}/${DATASET}/${RUN_TAG}"
 fi
-DATA_ROOT="${MOUNT}/home/zu/data"   # shared; torchvision caches each dataset in its own subdir
+DATA_ROOT="${MOUNT}${DATADIR}"   # shared; torchvision caches each dataset in its own subdir
 JOB_NAME="faremark-c${CONFIG_IDX}-r${REPEAT}${FR_TAG}${USER_TAG}-$(date +%H%M%S)"
 
 echo "=== Submitting $JOB_NAME (config_idx=$CONFIG_IDX repeat=$REPEAT) ==="
@@ -162,7 +160,7 @@ runai submit "$JOB_NAME" \
   -e "NOTE=${NOTE:-}" -e "DEBUG_HOLD=$DEBUG_HOLD" \
   --command -- bash -c '
     set -euo pipefail
-    export USER=zu
+    export USER="$USERNAME"
     mkdir -p "$OUTPUT_DIR" "$DATA_ROOT"
     exec > >(tee "$OUTPUT_DIR/pod.log") 2>&1
     # ---- pod.log structure -------------------------------------------------
@@ -180,12 +178,12 @@ runai submit "$JOB_NAME" \
     nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null | sed "s/^/  /" || echo "  nvidia-smi unavailable"
 
     echo "== CODE =="
-    rm -rf /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl
-    git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl 2>&1 | sed "s/^/  /"
-    if [ ! -d "/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl" ]; then
-      echo "ERROR: /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl not found in the repo."; sync; sleep 2; exit 3
+    rm -rf "$TMPREPO"
+    git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO" "$TMPREPO" 2>&1 | sed "s/^/  /"
+    if [ ! -d "$TMPREPO" ]; then
+      echo "ERROR: "$TMPREPO" not found in the repo."; sync; sleep 2; exit 3
     fi
-    GIT_COMMIT="$(git -C /tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl rev-parse HEAD 2>/dev/null || echo unknown)"
+    GIT_COMMIT="$(git -C "$TMPREPO" rev-parse HEAD 2>/dev/null || echo unknown)"
     export GIT_COMMIT GIT_BRANCH
     printf "  %-22s %s\n" "repo"    "$GIT_REPO"
     printf "  %-22s %s\n" "branch"  "$GIT_BRANCH"
@@ -200,8 +198,8 @@ runai submit "$JOB_NAME" \
     [ -n "${NOTE:-}" ] && printf "  %-22s %s\n" "note" "$NOTE"
     echo "================================================================"
 
-    export PYTHONPATH="/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl"
-    cd "/tmp/submarine_freerider_watermarking_federatedlearning_summer-epfl"
+    export PYTHONPATH="$TMPREPO"
+    cd "$TMPREPO"
     set +e
     EXTRA_ARR=($PY_EXTRA)
     [ -n "${NOTE:-}" ] && EXTRA_ARR+=(--manifest_note "$NOTE")

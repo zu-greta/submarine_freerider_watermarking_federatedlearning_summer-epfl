@@ -16,7 +16,7 @@ AdaptiveTapFreeRider / GraftBlockFreeRider (`_SCOPE_KEEP`) count *named paramete
 tensors from the end* of this exact model:
 
   This ResNet-18 (CIFAR stem) has 62 named parameter tensors (~11.2M scalars).
-  named_parameters() order is registration order, so the LAST tensors are:
+  named_parameters() order is registration order, so the last tensors are:
         ... layer4.1.conv2.weight,
             layer4.1.bn2.weight, layer4.1.bn2.bias,
             fc.weight, fc.bias

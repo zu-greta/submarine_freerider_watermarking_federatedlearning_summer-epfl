@@ -24,10 +24,10 @@
 #
 # =============================================================================
 set -uo pipefail
-# ===================== DATASET SWITCH (decide once, here) =====================
+# ===================== DATASET SWITCH =====================
 # DATASET CONFIG: cifar100 (default) | cifar10 | mnist | food101 
 export DATASET="${DATASET:-cifar100}"
-export FOOD_SIZE="${FOOD_SIZE:-64}"           # Food-101 input resolution (only used for food101)
+export FOOD_SIZE="${FOOD_SIZE:-64}"           # Food-101 input resolution 
 export DRYRUN=1 JOBS_FILE="${JOBS_FILE:-jobs.tsv}"
 export NUM_WORKERS="${NUM_WORKERS:-0}"
 WANT="${1:-A}"
@@ -38,7 +38,7 @@ echo "== building $JOBS_FILE  groups=[${WANT# }]  dataset=$DATASET  PAPER_OK=$PA
 has(){ [[ "$WANT" == *" $1 "* ]]; }
 
 # ---------------------------------------------------------------------------
-# GROUP A -- proven IID baseline (cifar100, 10 clients). 
+# GROUP A -- IID baseline (cifar100, 10 clients)
 # ---------------------------------------------------------------------------
 if has A; then
   echo " Group A -- IID baseline (cifar100, 10 clients)"
@@ -120,7 +120,7 @@ if has T; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP D -- +N reduced spectrum at the hard classes (3,6). 
+# GROUP D -- +N reduced spectrum at the hard classes (3,6)
 # ---------------------------------------------------------------------------
 if has D; then
   echo "   (group D -- uncomment loop below to regenerate)"
@@ -134,7 +134,7 @@ if has D; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP E -- non-IID (Dirichlet). E1 honest a=0.5, E2 reduced a=0.5, E3 alpha sweep.
+# GROUP E -- non-IID (Dirichlet). E1 honest a=0.5, E2 reduced a=0.5, E3 alpha sweep
 # ---------------------------------------------------------------------------
 if has E; then
   SEEDS_E="${SEEDS_E:-0 1 2}"
@@ -202,8 +202,8 @@ if has E; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP EA -- distribution-aware trigger assignment (non-IID fairness fix).
-#   Server assigns each client a class it holds a lot of (instead of blind cid%n).
+# GROUP EA -- distribution-aware trigger assignment 
+#   Server assigns each client a class it holds a lot of 
 # ---------------------------------------------------------------------------
 if has EA; then
   SEEDS_EA="${SEEDS_EA:-0 1 2}"
@@ -281,27 +281,27 @@ if has K; then
          TAP_WARMUP_MODE=dynamic TAP_CONV_EPS=0.03 TAP_CONV_PATIENCE=2 \
          TAP_HONEST_MIN=6 TAP_WARMUP_CAP=15"
 
-  # K4 -- block2 scope, hard/medium classes 3,6 
-  for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=block2 FAMILY="K4_alldyn_block2_c36" \
-        NOTE="K4 hard classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
-        ./submit_experiment.sh 14 "$s"
-  done
-  # K4 -- block2 scope, EASY classes 1,7  
-  for s in $SEEDS_K; do
-    env $kbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 FAMILY="K4_alldyn_block2_c17" \
-        NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
-        ./submit_experiment.sh 14 "$s"
-  done
+  # # K4 -- block2 scope, hard/medium classes 3,6 
+  # for s in $SEEDS_K; do
+  #   env $kbase TAP_SCOPE=block2 FAMILY="K4_alldyn_block2_c36" \
+  #       NOTE="K4 hard classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
+  # # K4 -- block2 scope, EASY classes 1,7  
+  # for s in $SEEDS_K; do
+  #   env $kbase TAP_SCOPE=block2 FREE_RIDER_IDS=1,7 FAMILY="K4_alldyn_block2_c17" \
+  #       NOTE="K4 easy classes all-dynamic + block2 (self-eta, derived margin, dynamic warmup)" \
+  #       ./submit_experiment.sh 14 "$s"
+  # done
 
-  # K9 -- HEAD2 scope submarine (all-dynamic), matches LastBlock's head2 scope 
+  # K9 -- head2 scope submarine (all-dynamic)
   #       K9 hard/medium classes 3,6
   for s in $SEEDS_K; do
     env $kbase TAP_SCOPE=head2 FAMILY="K9_alldyn_head2_c36" \
         NOTE="K9 hard classes all-dynamic + head2 (self-eta, derived margin, dynamic warmup)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # K9 -- head2 scope, EASY classes 1,7
+  # K9 -- head2 scope, easy classes 1,7
   for s in $SEEDS_K; do
     env $kbase TAP_SCOPE=head2 FREE_RIDER_IDS=1,7 FAMILY="K9_alldyn_head2_c17" \
         NOTE="K9 easy classes all-dynamic + head2 (self-eta, derived margin, dynamic warmup)" \
@@ -317,14 +317,13 @@ if has Z; then
   for s in $SEEDS_Z; do
     env ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 WM_LAMBDA=0 \
         FAMILY="A0_nowm_honest_c100" \
-        NOTE="Z no-watermark control: lambda=0 (embedding OFF) but verifier ON, so trig_acc is logged; confirms A1 trig_acc~0 is caused by the watermark, not the class" \
+        NOTE="Z no-watermark control: lambda=0 (embedding OFF)" \
         ./submit_experiment.sh 14 "$s"
   done
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP Y -- J4 oracle threshold - K4 submarine match 
-#   J4 = the oracle-eta version of K4 - (AUTOP_ORACLE_ETA=0.264, target 0.234)
+# GROUP Y -- J4 oracle threshold - K4 submarine match (AUTOP_ORACLE_ETA=0.264, target 0.234)
 # ---------------------------------------------------------------------------
 if has Y; then
   SEEDS_Y="${SEEDS_Y:-0 1 2}"                      
@@ -350,9 +349,10 @@ fi
 
 if has L; then
   # ---------------------------------------------------------------------------
-  # GROUP L -- BLOCK-GRAFT free-rider (attack="graftblock") - OUR ATTACK
+  # GROUP L -- HEAD-ONLY free-rider (attack="graftblock") - OUR ATTACK
   #   Warm up honest, then free-ride train only the last layers on a reduced shard (cpc=5)
   #     head2  = softmax fc + the conv layer just before it   (last 5 tensors)
+  #     head2  = softmax fc (last 2 tensors)
   # ---------------------------------------------------------------------------
   SEEDS_L="${SEEDS_L:-0 1 2}"                        
   lbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
@@ -386,8 +386,7 @@ if has L; then
         NOTE="L5 graftblock reduced cpc5 + head2 (softmax+prev layer) no graft (classes 1,7)" \
         ./submit_experiment.sh 14 "$s"
     # -----------------------------------------------------------------------
-    # HEAD-ONLY variants (TAP_SCOPE=head = the softmax fc ONLY, last 2 tensors:
-    #   fc.weight, fc.bias). 
+    # HEAD-ONLY variants (TAP_SCOPE=head = the softmax fc ONLY, last 2 tensors: fc.weight, fc.bias). 
     # -----------------------------------------------------------------------
     # L6 -- head scope (softmax fc only), hard classes 3,6
     env $lbase TAP_SCOPE=head   TAP_COAST_MODE=decay \
@@ -413,13 +412,13 @@ if has F; then
       FEDIPR_NUM_TRIGGER=${FEDIPR_NUM_TRIGGER:-40} FEDIPR_TARGET_MODE=${FEDIPR_TARGET_MODE:-cid}"
   FIETA="${FEDIPR_ETA:-0.20}"
 
-  # F_A1 -- honest baseline (calibration source + honest floor). No eta (calib run).
+  # F_A1 -- honest baseline 
   for s in 0 1 2 3 4 5; do
     env $FI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
         FAMILY="F_A1_honest_c100_fi" NOTE="F_A1 FedIPR honest baseline (calibration)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # F_H5 / F_H6 -- positive controls (MUST be caught: trigger acc ~ chance).
+  # F_H5 / F_H6 -- positive controls 
   for s in 0 1 2; do
     env $FI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=$FIETA ROUNDS=50 \
         FAMILY="F_H5_prevmodel_c100_fi" NOTE="F_H5 FedIPR previous-models control" \
@@ -430,8 +429,7 @@ if has F; then
         FAMILY="F_H6_gaussian_c100_fi" NOTE="F_H6 FedIPR gaussian-noise control" \
         ./submit_experiment.sh 14 "$s"
   done
-  # F_L1 / F_L5 -- graftblock head2 (MAIN attack): re-embed the backdoor using only
-  #   the softmax fc + preceding conv, on the client's own trigger set + cpc5 common.
+  # F_L1 / F_L5 -- graftblock head2 
   fbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
          AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=$FIETA"
   for s in $SEEDS_F; do
@@ -470,7 +468,7 @@ if has F; then
 fi
 
 # ---------------------------------------------------------------------------
-# GROUP G -- FedIPR feature-based SIGN watermark = white-box scheme.
+# GROUP G -- FedIPR feature-based sign watermark = white-box scheme
 #   wm embedded in the signs of the output layer scale + read white box from weights
 #   A1 honest + H controls + L1/L5 graftblock + K9/K4 submarine, with fedipr sign
 # ---------------------------------------------------------------------------
@@ -481,13 +479,13 @@ if has G; then
       FEDIPR_SIGN_CARRIER=${FEDIPR_SIGN_CARRIER:-auto_last_bn}"
   GSETA="${FEDIPR_SIGN_ETA:-0.20}"
 
-  # G_A1 -- honest baseline (calibration source + honest floor). No eta (calib run).
+  # G_A1 -- honest baseline 
   for s in 0 1 2 3 4 5; do
     env $GI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
         FAMILY="G_A1_honest_c100_ws" NOTE="G_A1 FedIPR-sign honest baseline (calibration)" \
         ./submit_experiment.sh 14 "$s"
   done
-  # G_H5 / G_H6 -- positive controls (MUST be caught: sign ber ~ 0.5 chance).
+  # G_H5 / G_H6 -- positive controls 
   for s in 0 1 2; do
     env $GI ATTACK=previous_models NUM_FREE_RIDERS=2 FREE_RIDER_IDS=3,6 WM_ETA_FIXED=$GSETA ROUNDS=50 \
         FAMILY="G_H5_prevmodel_c100_ws" NOTE="G_H5 FedIPR-sign previous-models control" \
@@ -498,8 +496,7 @@ if has G; then
         FAMILY="G_H6_gaussian_c100_ws" NOTE="G_H6 FedIPR-sign gaussian-noise control" \
         ./submit_experiment.sh 14 "$s"
   done
-  # G_L1 / G_L5 -- graftblock head2 (MAIN attack): re-embed the sign bits using only
-  #   head2 (which holds the output-layer carrier), on cpc5 task data.
+  # G_L1 / G_L5 -- graftblock head2 
   gbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
          AUTOP_COMMON_PER_CLASS=5 AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=$GSETA"
   for s in $SEEDS_G; do
@@ -509,7 +506,7 @@ if has G; then
     env $GI $gbase TAP_SCOPE=head2 TAP_COAST_MODE=decay FREE_RIDER_IDS=1,7 \
         FAMILY="G_L5_graftblock_head2_c17_ws" \
         NOTE="G_L5 FedIPR-sign graftblock head2 (easy 1,7)" ./submit_experiment.sh 14 "$s"
-    # HEAD-ONLY (TAP_SCOPE=head = softmax fc only, last 2 tensors) - white box lives in head2
+    # HEAD-ONLY (TAP_SCOPE=head = softmax fc only, last 2 tensors) - white box lives in head2 (tests not run!)
     env $GI $gbase TAP_SCOPE=head TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6 \
         FAMILY="G_L6_graftblock_head_c36_ws" \
         NOTE="G_L6 FedIPR-sign graftblock HEAD softmax-fc-only (hard 3,6)" ./submit_experiment.sh 14 "$s"

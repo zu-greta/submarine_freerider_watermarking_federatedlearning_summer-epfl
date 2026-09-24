@@ -1,3 +1,4 @@
+# DOCUMENTATION TO BE REVIEWWED
 # Watermarking is an Effort - output layer watermaking weaknesses — Technical Documentation
 
 **Project:** Adapting FedIPR/Faremark output layer watermark schemes and demonstrating that **output-layer / box-free watermarking cannot reliably detect free-riders**.
