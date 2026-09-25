@@ -200,7 +200,7 @@ APPENDIX_FIGURES = [
                  "actual, dashed = the same tap schedule if every tap used full data.",
          takeaway="The submarine only taps when its BER drifts up, stays on the honest floor, and "
                   "ends at @COST@ of the honest cost (@COSTFULL@ if taps used full data)."),
-    # ---- (4) ROC: no BER threshold separates honest clients from free-riders (the "money plot").
+    # ---- (4) ROC: no BER threshold separates honest clients from free-riders 
     #   negatives = honest clients across all trigger classes (A1 + every T decade + benign clients of
     #   the FR runs); positives = free-riders pooled over the head-only, reduced-shard and submarine
     dict(name="app_roc_faremark", kind="roc", fpr_budget=0.05,
@@ -223,6 +223,27 @@ APPENDIX_FIGURES = [
          takeaway="The free-rider operating points lie inside the honest band, so a BER threshold "
                   "detects them only at chance (AUC @AUC@) --- watermark verification cannot "
                   "separate honest clients from free-riders."),
+    # ---- (4b) ROC, CLASS-NORMALIZED
+    dict(name="app_roc_faremark_norm", kind="roc", fpr_budget=0.05, class_normalize=True,
+         honest=["A1_honest_c100",
+                 "T4_honest_c100_cls1019", "T5_honest_c100_cls2029", "T8_honest_c100_cls3039",
+                 "T1_honest_c100_cls4049", "T9_honest_c100_cls5059", "T6_honest_c100_cls6069",
+                 "T7_honest_c100_cls7079", "T10_honest_c100_cls8089", "T2_honest_c100_cls9099"],
+         fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17",       # head-only (our attack)
+             "A2_reduced_c100_c17", "A3_reduced_c100_c36",             # reduced-shard
+             "K9_alldyn_head2_c17", "K9_alldyn_head2_c36",             # submarine (head2)
+             "K4_alldyn_block2_c17", "K4_alldyn_block2_c36"],          # submarine (block2)
+         caption="FareMark (CIFAR-100): \\emph{class-normalized} ROC of the per-client watermark-BER "
+                 "threshold detector. Each client's score is its watermark BER minus the honest floor "
+                 "of its own trigger class, so a client is flagged only when it does worse than an "
+                 "honest client on the \\emph{same} class. Negatives are honest clients (@NNEG@ "
+                 "points), positives are our free-riders (@NPOS@ points, pooled over the head-only, "
+                 "reduced-shard and submarine variants). Removing the class-difficulty artefact drops "
+                 "the detector to AUC @AUC@: at a @FPRB@\\% false-positive budget only @TPRB@\\% of "
+                 "free-riders are caught. Tail-mean over the last @TAIL@ rounds.",
+         takeaway="Once each client is compared against the honest floor of its own trigger class, the "
+                  "apparent separation vanishes (AUC @AUC@) --- the pooled curve only ever separated "
+                  "clients by class difficulty, not by free-riding."),
 ]
 
 # ----------------------------------------------------------------------------
@@ -1035,8 +1056,18 @@ def submarine_stats(runs, fam):
                 final=cost.get(last, float("nan")) if last else float("nan"),
                 finalcf=costcf.get(last, float("nan")) if last else float("nan"))
 
-def roc_stats(runs, honest_fams, fr_fams, tail, fpr_budget=0.05):
-    """Per-client tail-mean watermark BER -> ROC of a BER-threshold free-rider detector"""
+def roc_stats(runs, honest_fams, fr_fams, tail, fpr_budget=0.05, class_normalize=False):
+    """Per-client tail-mean watermark BER -> ROC of a BER-threshold free-rider detector.
+
+    class_normalize=False (default): the score is the raw tail-mean BER, pooled over every
+    trigger class. Because the honest BER floor varies several-fold by trigger class, a pooled
+    ROC partly separates clients by class difficulty rather than by free-riding, which inflates
+    the AUC above chance.
+
+    class_normalize=True: subtract each client's per-class honest floor (mean BER of the honest
+    negatives that carry the SAME trigger class) from its score before the sweep. This is the
+    correct 'is this client worse than an honest client on the same class?' test -- it removes the
+    class-difficulty artefact, and the free-riders collapse back into the honest band."""
     def per_client(fam):
         out = []
         for r in runs.get(fam, []):
@@ -1045,34 +1076,51 @@ def roc_stats(runs, honest_fams, fr_fams, tail, fpr_budget=0.05):
                 for p in (h.get("wm_per_client") or []):
                     if p.get("ber") is None:
                         continue
-                    d = acc.setdefault(p.get("cid"), {"ber": [], "fr": bool(p.get("is_free_rider"))})
+                    d = acc.setdefault(p.get("cid"),
+                                       {"ber": [], "fr": bool(p.get("is_free_rider")),
+                                        "cls": (None if p.get("trigger_class") is None
+                                                else int(p["trigger_class"]))})
                     d["ber"].append(float(p["ber"]))
+                    if d["cls"] is None and p.get("trigger_class") is not None:
+                        d["cls"] = int(p["trigger_class"])
             for d in acc.values():
                 if d["ber"]:
-                    out.append((st.mean(d["ber"]), d["fr"]))
+                    out.append((st.mean(d["ber"]), d["fr"], d["cls"]))
         return out
+    # (score, class) per client, split into honest negatives and free-rider positives
     neg, pos = [], []
     for fam in list(honest_fams) + list(fr_fams):
-        for b, isfr in per_client(fam):
-            (pos if isfr else neg).append(b)
+        for b, isfr, c in per_client(fam):
+            (pos if isfr else neg).append((b, c))
     if not neg or not pos:
         return None
-    # AUC via Mann-Whitney (P(pos score > neg score), ties 0.5) for the flag-if-BER>tau detector
+    if class_normalize:
+        # per-class honest floor = mean BER of the honest negatives carrying that trigger class
+        floor = defaultdict(list)
+        for b, c in neg:
+            floor[c].append(b)
+        cls_mean = {c: st.mean(v) for c, v in floor.items() if v}
+        glob = st.mean([b for b, _ in neg])          # fallback for a class with no honest negative
+        adj = lambda b, c: b - cls_mean.get(c, glob)
+        neg = [(adj(b, c), c) for b, c in neg]
+        pos = [(adj(b, c), c) for b, c in pos]
+    negv = [b for b, _ in neg]; posv = [b for b, _ in pos]
+    # AUC via Mann-Whitney (P(pos score > neg score), ties 0.5) for the flag-if-score>tau detector
     gt = eq = 0
-    for a in pos:
-        for b in neg:
+    for a in posv:
+        for b in negv:
             if a > b: gt += 1
             elif a == b: eq += 1
-    auc = (gt + 0.5 * eq) / (len(pos) * len(neg))
-    # ROC: sweep tau over all observed scores (flag if BER > tau)
-    scores = sorted(set(neg + pos))
-    roc = sorted({(sum(1 for x in neg if x > tau) / len(neg),
-                   sum(1 for x in pos if x > tau) / len(pos))
+    auc = (gt + 0.5 * eq) / (len(posv) * len(negv))
+    # ROC: sweep tau over all observed scores (flag if score > tau)
+    scores = sorted(set(negv + posv))
+    roc = sorted({(sum(1 for x in negv if x > tau) / len(negv),
+                   sum(1 for x in posv if x > tau) / len(posv))
                   for tau in [scores[0] - 1e-9] + scores})
     within = [(f, t) for f, t in roc if f <= fpr_budget]
     op = max(within, key=lambda t: t[1]) if within else (0.0, 0.0)   # best TPR within the FPR budget
-    return dict(neg=neg, pos=pos, roc=roc, auc=auc, n_neg=len(neg), n_pos=len(pos),
-                fpr_budget=fpr_budget, op=op)
+    return dict(neg=negv, pos=posv, roc=roc, auc=auc, n_neg=len(negv), n_pos=len(posv),
+                fpr_budget=fpr_budget, op=op, class_normalize=class_normalize)
 
 
 GROUP_COLORS = ["chonest", "cfr", "cacc", "cfull", "cyel", "csky", "cprev", "cgrey"]
@@ -1246,19 +1294,27 @@ def emit_submarine(fig, runs, out, tail):
 
 def emit_roc(fig, runs, out, tail):
     """(4) ROC of a per-client watermark-BER threshold detector"""
-    s = roc_stats(runs, fig.get("honest", []), fig.get("fr", []), tail, fig.get("fpr_budget", 0.05))
+    s = roc_stats(runs, fig.get("honest", []), fig.get("fr", []), tail, fig.get("fpr_budget", 0.05),
+                  class_normalize=fig.get("class_normalize", False))
     if s is None:
         return None
     name = fig["name"]; dat = f"{name}.dat"
     write_dat(os.path.join(out, "data", dat), ["fpr", "tpr"], s["roc"])
     b = s["fpr_budget"]; bpct = f"{b * 100:.0f}"; opf, opt = s["op"]; tprb = f"{opt * 100:.0f}"
+    halfb = b / 2.0
     shade = (f"\\addplot[name path=rbz,draw=none,forget plot] coordinates {{(0,0) ({b},0)}};\n"
              f"\\addplot[name path=rbo,draw=none,forget plot] coordinates {{(0,1) ({b},1)}};\n"
              f"\\addplot[cprev!7,forget plot] fill between[of=rbz and rbo];\n"
-             f"\\node[anchor=south west,font=\\scriptsize,cprev!70] at (axis cs:{b},0.02) "
+             # FPR-budget label: vertical, centred in the thin shaded band so it stays
+             # clear of the operating-point label and the curve.
+             f"\\node[rotate=90,anchor=center,font=\\tiny,cprev!60] at (axis cs:{halfb},0.5) "
              f"{{FPR $\\le$ {bpct}\\%}};\n")
+    # operating-point label: up-and-right of the marker on a white pad (op always at low FPR).
     op = (f"\\addplot[cprev,only marks,mark=o,mark size=2.2pt,forget plot] coordinates {{({opf},{opt})}};\n"
-          f"\\node[anchor=north west,font=\\scriptsize] at (axis cs:{opf},{opt}) {{{tprb}\\% TPR}};\n")
+          f"\\node[anchor=south west,font=\\scriptsize,fill=white,fill opacity=0.72,"
+          f"text opacity=1,inner sep=1pt,xshift=2pt,yshift=2pt] at (axis cs:{opf},{opt}) "
+          f"{{{tprb}\\% TPR}};\n")
+    thr_label = "class-normalized BER" if s.get("class_normalize") else "BER threshold"
     f2 = fill_tokens(fig, AUC=f"{s['auc']:.2f}", NNEG=s["n_neg"], NPOS=s["n_pos"],
                      FPRB=bpct, TPRB=tprb, TAIL=tail)
     tex = (fig_open(f2, "width=6cm,height=6cm,xlabel={false-positive rate (honest clients flagged)},"
@@ -1267,7 +1323,7 @@ def emit_roc(fig, runs, out, tail):
            + shade
            + "\\addplot[cgrey,densely dashed] coordinates {(0,0) (1,1)};\\addlegendentry{chance (AUC 0.5)}\n"
            + f"\\addplot[cfr,mark=*,mark size=0.9pt,thick] table[x=fpr,y=tpr]{{{dat}}};"
-             f"\\addlegendentry{{BER threshold (AUC {s['auc']:.2f})}}\n"
+             f"\\addlegendentry{{{thr_label} (AUC {s['auc']:.2f})}}\n"
            + op + fig_close(f2))
     return dat, tex
 

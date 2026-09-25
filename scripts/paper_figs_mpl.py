@@ -505,26 +505,34 @@ def fig_submarine(spec, runs, out, tail):
 # appendix ROC
 # ============================================================================
 def fig_roc(spec, runs, out, tail):
+    norm = spec.get("class_normalize", False)
     s = TP.roc_stats(runs, spec.get("honest", []), spec.get("fr", []), tail,
-                     spec.get("fpr_budget", 0.05))
+                     spec.get("fpr_budget", 0.05), class_normalize=norm)
     if s is None:
         print(f"  skip {spec['name']} (need honest + FR per-client BER)"); return
     fpr = [p[0] for p in s["roc"]]; tpr = [p[1] for p in s["roc"]]
     b = s["fpr_budget"]; opf, opt = s["op"]
-    fig, ax = plt.subplots(figsize=(4.8, 4.4))
+    thr_label = "class-normalized BER" if norm else "BER threshold"
+    fig, ax = plt.subplots(figsize=(5.2, 4.8))
     ax.axvspan(0, b, color=C_PREV, alpha=0.06)
-    ax.text(b, 0.02, f" FPR ≤ {b*100:.0f}%", color="#555555", fontsize=8, va="bottom", ha="left")
+    ax.text(b / 2, 0.5, f"FPR ≤ {b*100:.0f}%", rotation=90, color="#777777",
+            fontsize=7, va="center", ha="center", alpha=0.9)
     ax.plot([0, 1], [0, 1], ls="--", color="#999999", lw=1, label="chance (AUC 0.5)")
-    ax.plot(fpr, tpr, color=C_FR, lw=2, marker="o", ms=2.5, label=f"BER threshold (AUC {s['auc']:.2f})")
+    ax.plot(fpr, tpr, color=C_FR, lw=2, marker="o", ms=2.5, label=f"{thr_label} (AUC {s['auc']:.2f})")
     ax.plot([opf], [opt], "o", mfc="none", mec=C_PREV, ms=7)
-    ax.annotate(f"{opt*100:.0f}% TPR", (opf, opt), xytext=(5, -2), textcoords="offset points", fontsize=8)
+    ax.annotate(f"{opt*100:.0f}% TPR", (opf, opt), xytext=(8, 6),
+                textcoords="offset points", fontsize=8, ha="left", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.75))
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
     ax.set_xlabel("false-positive rate (honest flagged)")
     ax.set_ylabel("true-positive rate (FR detected)")
     ax.grid(True); _clean(ax); ax.legend(fontsize=8, loc="lower right")
-    ax.set_title(spec.get("title", f"ROC: no threshold separates them (AUC {s['auc']:.2f})"), fontsize=10)
-    print(f"    ROC: n_neg={s['n_neg']} n_pos={s['n_pos']} AUC={s['auc']:.3f} "
-          f"TPR@{b*100:.0f}%FPR={opt*100:.0f}%")
+    default_title = ("class-normalized ROC: no per-class threshold separates them "
+                     f"(AUC {s['auc']:.2f})" if norm
+                     else f"ROC: no threshold separates them (AUC {s['auc']:.2f})")
+    ax.set_title(spec.get("title", default_title), fontsize=9)
+    print(f"    ROC{' (class-norm)' if norm else ''}: n_neg={s['n_neg']} n_pos={s['n_pos']} "
+          f"AUC={s['auc']:.3f} TPR@{b*100:.0f}%FPR={opt*100:.0f}%")
     return _save(fig, out, spec["name"])
 
 # ============================================================================
@@ -630,6 +638,17 @@ APPENDIX_FIGS = [
              "K9_alldyn_head2_c17", "K9_alldyn_head2_c36",
              "K4_alldyn_block2_c17", "K4_alldyn_block2_c36"],
          title="faremark: ROC honest vs FR threshold"),
+    # class-normalized twin (score = BER - own trigger-class honest floor)
+    dict(name="app_roc_faremark_norm", kind="roc", fpr_budget=0.05, class_normalize=True,
+         honest=["A1_honest_c100",
+                 "T4_honest_c100_cls1019", "T5_honest_c100_cls2029", "T8_honest_c100_cls3039",
+                 "T1_honest_c100_cls4049", "T9_honest_c100_cls5059", "T6_honest_c100_cls6069",
+                 "T7_honest_c100_cls7079", "T10_honest_c100_cls8089", "T2_honest_c100_cls9099"],
+         fr=["L6_graftblock_head_c36", "L7_graftblock_head_c17",
+             "A2_reduced_c100_c17", "A3_reduced_c100_c36",
+             "K9_alldyn_head2_c17", "K9_alldyn_head2_c36",
+             "K4_alldyn_block2_c17", "K4_alldyn_block2_c36"],
+         title="faremark: class-normalized ROC (BER − per-class honest floor)"),
 ]
 EMIT = {"timeline": fig_timeline, "attack": fig_attack, "classdiff": fig_classdiff,
         "layers": fig_layers, "costlayers": fig_costlayers, "costtable": tab_costs,

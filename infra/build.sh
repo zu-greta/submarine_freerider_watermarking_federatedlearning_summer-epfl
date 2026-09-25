@@ -4,7 +4,7 @@
 set -eu
 
 if [ -f .env ]; then
-    export $(echo $(cat .env | sed 's/#.*//g' | xargs))
+    set -a; . ./.env; set +a
 else
     echo "Error: .env file not found."
     exit 1

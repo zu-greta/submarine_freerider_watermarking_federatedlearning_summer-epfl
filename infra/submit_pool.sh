@@ -99,8 +99,9 @@ for ((i=0; i<PODS; i++)); do
     --run-as-uid "$USER_UID" --run-as-gid "$USER_GID" --memory "$MEMORY" \
     -e "SHARD_B64=$FULL_B64" -e "WORKERS=$POD_WORKERS" -e "SHARD_ID=$i" \
     -e "POOL_TAG=$POOL_TAG" \
-    -e "RESULTS_ROOT=${MOUNT}/home/zu/results" -e "DATA_ROOT=${MOUNT}/home/zu/data" \
+    -e "RESULTS_ROOT=${MOUNT}${RESULTDIR:-/home/zu/results}" -e "DATA_ROOT=${MOUNT}${DATADIR:-/home/zu/data}" \
     -e "GIT_REPO=$GIT_REPO" -e "GIT_BRANCH=$GIT_BRANCH" \
+    -e "USERNAME=$USERNAME" -e "TMPREPO=$TMPREPO" \
     -e "SCRIPT=$SCRIPT" \
     --command -- bash -c '
       # POD_BLOCK_BEGIN  
