@@ -392,7 +392,7 @@ runbook.sh -- run phases
     FOOD_RES=~/local/results/food101 ./runbook.sh appendix-food   4c. food-101 figs -> appendix
     (appendix-all = both; plot-legacy = old legacy plots)
 
-  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD .
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD HS .
 USAGE
     ;;
 esac

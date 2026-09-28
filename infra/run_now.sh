@@ -10,7 +10,7 @@
 # Faremark:
 #   A  IID baseline (A1 honest, A2 reduced easy c17, A3 reduced hard c36)
 #   T  honest band generality: trigger classes beyond 0-9 (check the mapping)
-#   D  reduced free-rider +N data-budget spectrum (c36)
+#   D  reduced free-rider +N data-budget spectrum (c36 = cids 3,6)
 #   E  non-IID starved (E1 honest, E2 reduced, E3 alpha sweep)
 #   EA non-IID distribution-aware assignment (EA1 honest, EA2 reduced)
 #   H  baseline free-riders: H5 previous-models + H6 gaussian-noise
@@ -19,8 +19,10 @@
 #   Z  no-watermark control (all-honest, lambda=0) for the trig_acc check
 #   Y  oracle threshold (J4): the submarine K4 run handed the true eta (1,7 and 3,6) (appendix)
 # FedIPR:
-#   F  FedIPR backdoor (2nd output-layer scheme): honest+controls+L1/L5+K9/K4 under WM_SCHEME=fedipr - TODO
-#   G  FedIPR SIGN (3rd scheme, WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, wm in the output layer head2 - TODO
+#   F  FedIPR backdoor (black-box, noise triggers): honest+controls+L1/L5/L6/L7 under WM_SCHEME=fedipr (appendix)
+#   G  FedIPR SIGN (WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, wm in the output layer (head2) + layer sweep
+#   FD Food-101 / ResNet-50 basics (config 15, 1 seed) (appendix)
+#   HS 1-seed bundle: FareMark/backdoor HEAD FR + sign fixed/adaptive/full-data layer sweep (paper Fig. 6)
 #
 # =============================================================================
 set -uo pipefail
@@ -123,12 +125,12 @@ fi
 # GROUP D -- +N reduced spectrum at the hard classes (3,6)
 # ---------------------------------------------------------------------------
 if has D; then
-  echo "   (group D -- uncomment loop below to regenerate)"
+  echo " Group D -- reduced +N data-budget spectrum (cids 3,6)"
   for N in -1 0 1 2 5 10; do
     for s in 0 1 2; do
-      env ATTACK=reduced FREE_RIDER_IDS=6,8 AUTOP_COMMON_PER_CLASS=$N \
+      env ATTACK=reduced FREE_RIDER_IDS=3,6 AUTOP_COMMON_PER_CLASS=$N \
           AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=0.064 ROUNDS=50 \
-          FAMILY="D1_reduced_c100_c68_n${N}" NOTE="D1 +N spectrum N=$N" ./submit_experiment.sh 14 "$s"
+          FAMILY="D1_reduced_c100_c36_n${N}" NOTE="D1 +N spectrum N=$N" ./submit_experiment.sh 14 "$s"
     done
   done
 fi
@@ -408,7 +410,7 @@ fi
 # ---------------------------------------------------------------------------
 if has F; then
   SEEDS_F="${SEEDS_F:-0 1 2}"
-  FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-svhn} \
+  FI="WM_SCHEME=fedipr FEDIPR_TRIGGER_SOURCE=${FEDIPR_TRIGGER_SOURCE:-noise} \
       FEDIPR_NUM_TRIGGER=${FEDIPR_NUM_TRIGGER:-40} FEDIPR_TARGET_MODE=${FEDIPR_TARGET_MODE:-cid}"
   FIETA="${FEDIPR_ETA:-0.20}"
 
@@ -608,8 +610,10 @@ fi
 #   Runs:
 #     (a) FareMark   HEAD-only free-rider, classes 3,6   
 #     (b) FedIPR backdoor HEAD-only free-rider, 3,6       
-#     (c) FedIPR SIGN spread sweep, free-rider fixed at graftblock HEAD2 (3,6):
-#           1 -> 4 carrier layers (auto_last_bn) -> ALL BN (full depth)
+#     (c) FedIPR SIGN spread sweep, ADAPTIVE free-rider (scope widens to cover N), reduced shard
+#     (d) FedIPR SIGN spread sweep, honest floor + head2 free-rider (detection)
+#     (e) FedIPR SIGN spread sweep, ADAPTIVE free-rider on the FULL shard (cpc=-1)
+#     N = 1 / 6 / 20 carrier layers (auto_last_bn) -> paper Fig. 6 (fig4_detect_cost)
 # ---------------------------------------------------------------------------
 if has HS; then
   echo " Group HS -- 1-seed head/sweep bundle (cifar100)"
@@ -665,6 +669,17 @@ if has HS; then
       env $GIL $gb_hs TAP_SCOPE=head2 TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
           FAMILY="G_L1_graftblock_head2_c36_ws_L${NL}" \
           NOTE="HS sign FIXED head2 FR, sign in ${NL} layer(s) -- detection (3,6)" \
+          ./submit_experiment.sh 14 "$s"
+    done
+
+    # (e) FedIPR SIGN spread sweep -- ADAPTIVE FR on the FULL shard (cpc=-1): the full-data cost line
+    #     same as (c) but AUTOP_COMMON_PER_CLASS=-1 (overrides the cpc5 in gb_hs) -> cost ~= honest at N=20
+    for NL in 1 6 20; do
+      SC=${ADAPT_SCOPE[$NL]}
+      GIL="$GI_HS FEDIPR_SIGN_LAYERS=$NL FEDIPR_SIGN_CARRIER=auto_last_bn"
+      env $GIL $gb_hs AUTOP_COMMON_PER_CLASS=-1 TAP_SCOPE=$SC TAP_COAST_MODE=decay WM_ETA_FIXED=0.20 \
+          FAMILY="G_Lfull_c36_ws_L${NL}" \
+          NOTE="HS sign ADAPTIVE FR FULL shard (scope=$SC covers ${NL} carrier layer(s)), classes 3,6" \
           ./submit_experiment.sh 14 "$s"
     done
   done
