@@ -47,7 +47,7 @@ Three federated-learning (FL) watermarking schemes place their mark in the head 
 | `scripts/to_pgfplots.py` | analysis | paper figures + Table I -> `export/data/*.dat` + `export/fig/*.tex` (+ `all_figures.tex` menu); `--appendix` for the appendix set |
 | `scripts/paper_figs_mpl.py` | analysis | matplotlib (PNG) twins of the same paper/appendix figures + `tab1_costs.csv` |
 | `scripts/plots.py` | analysis | legacy per-family diagnostics (`./runbook.sh plot-legacy`) |
-| `infra/run_now.sh` | orchestration | builds `jobs.tsv` (the experiment manifest) for groups A, T, D, E, EA, H, K, Y, Z, L, F, G, FD, HS |
+| `infra/run_now.sh` | orchestration | builds `jobs.tsv` (the experiment manifest) for groups A, T, D, E, EA, H, K, Y, Z, L, F, G, GS, FD, HS |
 | `infra/runbook.sh` | orchestration | phase driver: manifest -> submit -> plot / appendix / appendix-food |
 | `infra/submit_experiment.sh` | orchestration | one RunAI/Kubernetes job submission (or one manifest row with `DRYRUN=1`); writes `pod.log` |
 | `infra/submit_pool.sh` | orchestration | replays `jobs.tsv` over `PODS × WORKERS` |
@@ -105,7 +105,7 @@ When an attacker trains, it does not use its full shard. `_SimpleFRMixin._prepar
 
 The family tags are not dataset names. In `A3_reduced_c100_c36`, `c100` = CIFAR-**100** and `c36` = the
 free-rider **client ids are 3 and 6** (so their trigger classes are 3 and 6). `c17` = cids 1,7, which are the "easy" classes; 3,6 are the "hard" classes. **Every free-rider run uses cids 3,6 or 1,7.** `aXX` = Dirichlet α (`a01`=0.1, `a10`=1.0).
-Suffixes: `_fi` = FedIPR backdoor, `_ws` = FedIPR sign, `_L<N>` = N sign carrier layers, `clsXXYY` = trigger-class decade (group T). 
+Suffixes: `_fi` = FedIPR backdoor, `_ws` = FedIPR sign, `_L<N>` = N sign carrier layers, `_s<N>` = N scattered sign carrier weights (group GS), `clsXXYY` = trigger-class decade (group T). 
 
 ---
 
@@ -161,6 +161,11 @@ label, read black-box), described in this section. The backdoor is fully impleme
 - *Carriers* = an ordered list chosen by the **server**: `auto_last_bn` + `fedipr_sign_layers=N` -> the last
   `N` normalization scales (output->body); `all_bn` -> every scale; or an explicit `"a,b,c"` name list
   (`resolve_carrier_names`).
+- *Scattered carrier* (`fedipr_sign_carrier=scatter`, group GS, exploratory): no layer at all. The server picks
+  `fedipr_sign_scatter_n` (default 512) **single scalar weights**, an equal share at random positions in every
+  parameter tensor (`scatter_carrier`; 8–9 per tensor on ResNet-18, conv / BN / fc alike), and they form **one**
+  carrier vector: same `E ∈ ℝ^{512×40}`, same hinge loss and same BER read as the 1-layer case. Positions are
+  shared by all clients; `E` and `B` stay per-client.
 - *Registration* = for each **carrier** `i`, each client gets a secret matrix `E_{k,i} ∈ ℝ^{C_i×N_i}` and bits
   `B_{k,i}`. `N_i` = `fedipr_sign_bits` (default 40) per layer, **auto-clamped** to `C_i // K` so all `K` clients can embed in that shared layer (FedIPR Thm. 1 capacity; `plan_bits`).
 - *Embedding* = task CE **+** `λ·L_sign` (`fedipr_sign_lambda=1.0`), where `L_sign` = **mean over carriers**
@@ -202,6 +207,9 @@ Scope map (`_SCOPE_KEEP`, counted from the end of `named_parameters()`; ResNet-1
 | `block` | 8 | last conv/BN pairs + fc | not used |
 | `block2` | 20 | last ~2.5 residual blocks + fc (~9.04M, ~80%) | adaptive sign FR at N=6; submarine K4 |
 | `full` | all | the whole model (= honest compute path) | adaptive sign FR at N=20 |
+| `wm` | — | **only the sign mark's carrier weights** (the carrier γ tensor(s), or the single scattered scalars); gradients are masked everywhere else and the rest of the submission is the exact global model. `graftblock` + `fedipr_sign` only | scattered-carrier FR (GS_Lwm, GS_Lwm0) |
+
+With no task data (`cpc=0`) the sign free-rider runs the sign-loss alone, which reads only the weights: it steps until every bit clears the margin (at most 200 steps) with no forward or backward pass through the network.
 
 
 ### 5.4 `adaptive_tap` (the "submarine", groups K/Y/E4/EA3) — appendix
@@ -225,7 +233,7 @@ It free-rides between "taps", training only when it must:
 
 ```
 # locally (needs submit_experiment.sh + submit_pool.sh + .env with REPO/PROJECT/IMAGE/PVC/MOUNT/...):
-BATCH="L G HS" ./runbook.sh manifest   # 1. build jobs.tsv (tokens: A T D E EA H K Y Z L F G FD HS)
+BATCH="L G HS" ./runbook.sh manifest   # 1. build jobs.tsv (tokens: A T D E EA H K Y Z L F G GS FD HS)
 WORKERS=6 PODS=2 ./runbook.sh submit   # 2. run the pod pool over jobs.tsv
 runai list jobs                        #    monitor; results land in $RES/<RUN_TAG>/
 # (all-submit = manifest + submit)
@@ -255,6 +263,7 @@ FOOD_RES=~/local/results/food101 ./runbook.sh appendix-food   # 3c. Food-101 set
 | **Y** | oracle-η submarine ablation (J4) | 3,6 / 1,7 | what self-estimation costs | appendix |
 | **FD** | Food-101 / ResNet-50 (config 15, 1 seed): FareMark honest / prev-models / head2 / head, sign honest / prev-models / head2 / head | 3,6 | generalisation across dataset + model | appendix (figs 12–19, Table II) |
 | **F** | **FedIPR backdoor** mirror: honest (6 seeds) + H controls + graftblock head2/head (submarine rows commented out) | 3,6 / 1,7 | 3rd scheme, black-box | implemented; not used |
+| **GS** | **FedIPR sign, scattered carrier** (512 scalar weights in every tensor), 1 seed: `scope=wm` FR on the reduced shard `GS_Lwm_c36_ws_s512` (= `G_L1_graftblock_head2_c36_ws` with the mark scattered). Commented out: `GS_A1_honest_c100_ws_s512`, fixed head2 FR `GS_L1_graftblock_head2_c36_ws_s512`, no-data FR `GS_Lwm0_c36_ws_s512` | 3,6 | does "train only what is watermarked" survive a mark that is not in a layer | exploratory |
 
 ### 6.2 Paper figures -> scripts -> families
 

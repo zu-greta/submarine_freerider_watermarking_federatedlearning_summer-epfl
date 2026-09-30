@@ -12,6 +12,8 @@
    * fedipr_sign_layers = N (>1)  -> N output-most normalization scales
    * carrier = "all_bn"  -> every normalization scale (full-depth FedIPR, most robust).
    * carrier = "name1,name2,..."  -> an explicit list (server forces exact locations).
+   * carrier = "scatter"  -> no layer at all: fedipr_sign_scatter_n single scalar weights at
+     random positions in every parameter tensor form one virtual carrier vector.
 ================================================================================
 """
 from __future__ import annotations
@@ -35,13 +37,39 @@ def list_bn_scale_names(model) -> list:
     return names
 
 
-def resolve_carrier_names(model, carrier: str = "auto_last_bn", n_layers: int = 1) -> list:
-    """ordered list of carrier param names 
+def scatter_carrier(model, n_weights: int, seed: int) -> dict:
+    """carrier="scatter": {param name: sorted flat positions} of `n_weights` scalar weights,
+    an equal share in every parameter tensor at random positions inside it.
+    Positions are the server's choice, shared by all clients (each keeps its own E / B)."""
+    named = list(model.named_parameters())
+    sizes = [int(p.numel()) for _, p in named]
+    left = min(max(1, int(n_weights)), sum(sizes))
+    quota = [0] * len(named)
+    while left > 0:                                   # equal share; small tensors cap at their size
+        open_ = [i for i in range(len(named)) if quota[i] < sizes[i]]
+        share = max(1, left // len(open_))
+        for i in open_:
+            take = min(share, sizes[i] - quota[i], left)
+            quota[i] += take
+            left -= take
+            if left == 0:
+                break
+    g = torch.Generator().manual_seed(int(seed) + 31337)
+    return {n: torch.randperm(sizes[i], generator=g)[:quota[i]].sort().values
+            for i, (n, _) in enumerate(named) if quota[i] > 0}
+
+
+def resolve_carrier_names(model, carrier: str = "auto_last_bn", n_layers: int = 1,
+                          scatter_n: int = 512, seed: int = 0) -> list:
+    """ordered list of carriers: a param name (whole tensor) or a scatter dict
 
     carrier="auto_last_bn" -> the last `n_layers` normalization scales (from output backward). n_layers=1 == the single output-layer scale.
-    carrier="all_bn"       -> every normalization scale 
-    carrier="a,b,c"        -> exactly these parameter names 
+    carrier="all_bn"       -> every normalization scale
+    carrier="a,b,c"        -> exactly these parameter names
+    carrier="scatter"      -> ONE virtual carrier: `scatter_n` scalar weights spread over every tensor
     """
+    if carrier == "scatter":
+        return [scatter_carrier(model, scatter_n, seed)]
     named = dict(model.named_parameters())
     if carrier and carrier not in ("auto_last_bn", "all_bn"):
         want = [c.strip() for c in carrier.split(",") if c.strip()]
@@ -58,9 +86,45 @@ def resolve_carrier_names(model, carrier: str = "auto_last_bn", n_layers: int = 
     return bn_out_first[:n]
 
 
+def _carrier_vec(tensors: dict, c) -> torch.Tensor:
+    """One carrier's weights out of a name -> tensor mapping (live params or a state_dict):
+    the whole tensor for a param name, the scalars at its positions for a scatter carrier."""
+    if isinstance(c, dict):
+        return torch.cat([tensors[n].reshape(-1)[idx.to(tensors[n].device)]
+                          for n, idx in c.items()])
+    return tensors[c]
+
+
 def per_carrier_channels(model, names) -> list:
     d = dict(model.named_parameters())
-    return [int(d[n].numel()) for n in names]
+    return [int(_carrier_vec(d, c).numel()) for c in names]
+
+
+def describe_carriers(carriers) -> list:
+    """Log/JSON-safe carrier names (a scatter carrier is summarised, not dumped)."""
+    return [f"scatter[{sum(len(i) for i in c.values())} weights / {len(c)} tensors]"
+            if isinstance(c, dict) else c for c in carriers]
+
+
+def carriers_to(carriers, device) -> list:
+    """Same carriers with the scatter positions on `device` (no transfer per training step)."""
+    return [{n: i.to(device) for n, i in c.items()} if isinstance(c, dict) else c
+            for c in carriers]
+
+
+def carrier_masks(model, carriers) -> dict:
+    """param name -> bool mask of the scalars that carry the mark (all True for a whole-tensor
+    carrier). Params with no entry carry nothing. Used by the scope="wm" free-rider."""
+    d = dict(model.named_parameters())
+    masks = {}
+    for c in carriers:
+        for n, idx in (c.items() if isinstance(c, dict) else [(c, None)]):
+            m = masks.setdefault(n, torch.zeros_like(d[n], dtype=torch.bool))
+            if idx is None:
+                m.fill_(True)
+            else:
+                m.view(-1)[idx.to(m.device)] = True
+    return masks
 
 
 def plan_bits(channels, bits_per_layer: int, n_clients: int) -> list:
@@ -132,7 +196,7 @@ def sign_ber(gammas, Es, bits_list) -> float:
 def gather_gammas_params(model, names) -> list:
     """Live (grad-enabled) carrier tensors from the model, in `names` order."""
     d = dict(model.named_parameters())
-    return [d[n] for n in names]
+    return [_carrier_vec(d, c) for c in names]
 
 
 @torch.no_grad()
@@ -140,8 +204,8 @@ def sign_ber_from_state(state: dict, names, Es, bits_list, device="cpu") -> floa
     """white box read: pull every carrier scale from a submitted state_dict and compute
     the total BER. Returns None if a carrier is missing from the state."""
     gammas = []
-    for n in names:
-        if n not in state:
+    for c in names:
+        if any(n not in state for n in (c if isinstance(c, dict) else [c])):
             return None
-        gammas.append(state[n].to(device))
+        gammas.append(_carrier_vec(state, c).to(device))
     return sign_ber(gammas, Es, bits_list)

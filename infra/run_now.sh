@@ -21,6 +21,8 @@
 # FedIPR:
 #   F  FedIPR backdoor (black-box, noise triggers): honest+controls+L1/L5/L6/L7 under WM_SCHEME=fedipr (appendix)
 #   G  FedIPR SIGN (WHITE-BOX): same rows under WM_SCHEME=fedipr_sign, wm in the output layer (head2) + layer sweep
+#   GS FedIPR SIGN, SCATTERED carrier (no layer: random scalar weights in every tensor):
+#      the scope=wm FR (trains only the marked weights, reduced shard), 1 seed; extra arms commented out
 #   FD Food-101 / ResNet-50 basics (config 15, 1 seed) (appendix)
 #   HS 1-seed bundle: FareMark/backdoor HEAD FR + sign fixed/adaptive/full-data layer sweep (paper Fig. 6)
 #
@@ -551,6 +553,50 @@ if has G; then
           NOTE="G_L1 FedIPR-sign graftblock head2, ${NL} carrier layer(s) (3,6)" \
           ./submit_experiment.sh 14 "$s"
     done
+  done
+fi
+
+# ---------------------------------------------------------------------------
+# GROUP GS -- FedIPR SIGN with a SCATTERED carrier (FEDIPR_SIGN_CARRIER=scatter)
+#   The mark is not in a layer: FEDIPR_SIGN_SCATTER_N scalar weights at random positions
+#   in EVERY parameter tensor form one carrier vector (512 weights / 40 bits == the 1-layer G run).
+#   Does the free-rider that trains only what is watermarked still work?
+#     GS_Lwm   scope=wm free-rider, reduced cpc5      (trains ONLY the scattered weights)
+#              == G_L1_graftblock_head2_c36_ws with the mark scattered; its 8 honest
+#              clients give the honest floor in the same run.
+#   Commented out (extra arms):
+#     GS_A1    honest floor
+#     GS_L1    FIXED head2 free-rider, reduced cpc5   (does not follow the mark)
+#     GS_Lwm0  scope=wm free-rider, NO data (cpc0)    (sign-loss only: no forward/backward pass)
+# ---------------------------------------------------------------------------
+if has GS; then
+  SEEDS_GS="${SEEDS_GS:-0}"
+  GSN="${FEDIPR_SIGN_SCATTER_N:-512}"
+  GSI="WM_SCHEME=fedipr_sign FEDIPR_SIGN_BITS=${FEDIPR_SIGN_BITS:-40} \
+       FEDIPR_SIGN_MARGIN=${FEDIPR_SIGN_MARGIN:-0.1} FEDIPR_SIGN_LAMBDA=${FEDIPR_SIGN_LAMBDA:-1.0} \
+       FEDIPR_SIGN_CARRIER=scatter FEDIPR_SIGN_SCATTER_N=$GSN"
+  GSSETA="${FEDIPR_SIGN_ETA:-0.20}"
+  gsbase="ATTACK=graftblock PARTITION=iid ROUNDS=50 FAST_DATA=1 \
+          AUTOP_HONEST_UNTIL=12 AUTOP_CALIB_ROUNDS=4 WM_ETA_FIXED=$GSSETA \
+          TAP_COAST_MODE=decay FREE_RIDER_IDS=3,6"
+
+  for s in $SEEDS_GS; do
+    # env $GSI ATTACK=none NUM_FREE_RIDERS=0 ROUNDS=50 \
+    #     FAMILY="GS_A1_honest_c100_ws_s${GSN}" \
+    #     NOTE="GS_A1 FedIPR-sign honest, ${GSN} scattered weights (calibration/floor)" \
+    #     ./submit_experiment.sh 14 "$s"
+    # env $GSI $gsbase AUTOP_COMMON_PER_CLASS=5 TAP_SCOPE=head2 \
+    #     FAMILY="GS_L1_graftblock_head2_c36_ws_s${GSN}" \
+    #     NOTE="GS_L1 FedIPR-sign FIXED head2 FR, ${GSN} scattered weights (3,6)" \
+    #     ./submit_experiment.sh 14 "$s"
+    env $GSI $gsbase AUTOP_COMMON_PER_CLASS=5 TAP_SCOPE=wm \
+        FAMILY="GS_Lwm_c36_ws_s${GSN}" \
+        NOTE="GS_Lwm FedIPR-sign FR trains ONLY the ${GSN} scattered weights, reduced cpc5 (3,6)" \
+        ./submit_experiment.sh 14 "$s"
+    # env $GSI $gsbase AUTOP_COMMON_PER_CLASS=0 TAP_SCOPE=wm \
+    #     FAMILY="GS_Lwm0_c36_ws_s${GSN}" \
+    #     NOTE="GS_Lwm0 FedIPR-sign FR trains ONLY the ${GSN} scattered weights, NO data (3,6)" \
+    #     ./submit_experiment.sh 14 "$s"
   done
 fi
 

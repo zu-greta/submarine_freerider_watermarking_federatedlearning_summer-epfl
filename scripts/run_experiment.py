@@ -109,7 +109,10 @@ def parse_args():
                    help="fedipr_sign: weight of the sign-loss added to the task loss.")
     p.add_argument("--fedipr_sign_carrier", type=str, default=None,
                    help="fedipr_sign: carrier scale param name, or 'auto_last_bn' "
-                        "(the output-layer scale; server choice that forces the layer).")
+                        "(the output-layer scale; server choice that forces the layer), or "
+                        "'scatter' (random scalar weights in every tensor, no layer).")
+    p.add_argument("--fedipr_sign_scatter_n", type=int, default=None,
+                   help="fedipr_sign carrier=scatter: number of scattered scalar weights.")
     p.add_argument("--wm_bits", type=int, default=None)
     p.add_argument("--wm_balanced_keys", dest="wm_balanced_keys",
                    action="store_true", default=None,
@@ -143,7 +146,7 @@ def parse_args():
     p.add_argument("--tap_period", type=int, default=None)
     p.add_argument("--tap_max_coast", type=int, default=None)
     p.add_argument("--tap_data_cpc", type=int, default=None)
-    p.add_argument("--tap_scope", type=str, default=None, choices=["full", "block2", "block", "head2", "head"])
+    p.add_argument("--tap_scope", type=str, default=None, choices=["full", "block2", "block", "head2", "head", "wm"])
     p.add_argument("--tap_coast_mode", type=str, default=None, choices=["decay", "graft"])
     p.add_argument("--tap_graft_decay", type=float, default=None)
     p.add_argument("--tap_probe_holdout", type=int, default=None)
@@ -196,7 +199,7 @@ _OVERRIDABLE = [
     "fedipr_trigger_dir", "fedipr_target_mode",
     # FedIPR feature-based sign watermark (white-box, 1+ normalization layers)
     "fedipr_sign_layers", "fedipr_sign_bits", "fedipr_sign_margin", "fedipr_sign_lambda",
-    "fedipr_sign_carrier",
+    "fedipr_sign_carrier", "fedipr_sign_scatter_n",
     "wm_eta_floor", "wm_eta_fixed", "calib_on_all",
     "tap_eta_source", "tap_eta_k", "tap_margin", "tap_when", "tap_period",
     "tap_max_coast", "tap_data_cpc", "tap_scope", "tap_coast_mode", "tap_graft_decay", "tap_probe_holdout",

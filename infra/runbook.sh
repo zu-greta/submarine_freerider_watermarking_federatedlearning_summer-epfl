@@ -364,7 +364,24 @@ phase_plot_legacy(){
   # one axis: FR BER vs #layers 
   run "$PL overlap --in '$ALL' --families G_A1_honest_c100_ws_L1 --fr_in $GSWEEP_FR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/G_layers_overlap"
 
-  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box + layer sweep)"
+  # ===================== GROUP GS -- FedIPR sign, SCATTERED carrier (no layer) =====
+  # scope=wm FR (reduced cpc5); the fixed head2 / no-data arms are skipped unless their runs exist.
+  # honest reference = the 1-layer sign honest family (GS_A1 is commented out in run_now.sh);
+  # set HON_GS=GS_A1_honest_c100_ws_s512 once that run exists.
+  GS_TAG="s${FEDIPR_SIGN_SCATTER_N:-512}"
+  HON_GS="${HON_GS:-$HON_WS}"
+  run "$PL honest_per_round --in '$ALL' --family $HON_GS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/GS_A1_honest_per_round"
+  GSFR=""
+  for fam in GS_L1_graftblock_head2_c36_ws_${GS_TAG} GS_Lwm_c36_ws_${GS_TAG} GS_Lwm0_c36_ws_${GS_TAG}; do
+    run "$PL timeline    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_GS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/timeline_${fam}"
+    run "$PL tap_perfr   --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_GS --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --out $OUT/tap_perfr_${fam}"
+    run "$PL accuracy    --in '$ALL' --family $fam --honest_in '$ALL' --honest_family $HON_GS --out $OUT/accuracy_${fam}"
+    run "$PL gpu_savings --in '$ALL' --family $fam --out $OUT/gpu_savings_${fam}"
+    GSFR="$GSFR '$RES/${fam}_rep*/result.json'"
+  done
+  run "$PL overlap --in '$ALL' --families $HON_GS --fr_in $GSFR --eta_tight $ETA_T_WS --eta_loose $ETA_L_WS --tail 20 --out $OUT/GS_overlap_band_vs_fr"
+
+  echo "   done -> $OUT  (A honest / D reduced / E starved-niid / EA fair-niid / K+Y submarine / Z no-wm control / F fedipr / G fedipr-sign white-box + layer sweep / GS scattered carrier)"
 }
 
 
@@ -392,7 +409,7 @@ runbook.sh -- run phases
     FOOD_RES=~/local/results/food101 ./runbook.sh appendix-food   4c. food-101 figs -> appendix
     (appendix-all = both; plot-legacy = old legacy plots)
 
-  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G FD HS .
+  batch tokens (whole, space/comma separated): A T D E EA H K Y Z L F G GS FD HS .
 USAGE
     ;;
 esac

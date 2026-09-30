@@ -273,6 +273,18 @@ class WatermarkClient(Client):
             "trigger_class": int(self.trigger_class),
         }
 
+    _SIGN_ONLY_MAX_STEPS = 200        # cap on the data-free sign-only steps (no task batches)
+
+    def _mask_grads(self):
+        """scope="wm" free-rider: zero every gradient outside the mark's carrier weights
+        (no-op for everyone else)."""
+        masks = getattr(self, "_wm_masks", None)
+        if not masks:
+            return
+        for n, p in self.model.named_parameters():
+            if p.grad is not None and n in masks:
+                p.grad.mul_(masks[n])
+
     # ---- FedIPR feature-based sign embedding (white box) --
     def _local_train_fedipr_sign(self, round_idx=None):
         """FedIPR feature-based watermark: L = L_task(CE) + lambda * L_sign, where L_sign is
@@ -298,23 +310,28 @@ class WatermarkClient(Client):
                 loss.backward()
                 if not torch.isfinite(loss):
                     opt.zero_grad(set_to_none=True); continue
+                self._mask_grads()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 opt.step()
                 cl_sum += float(cl.detach()); wm_sum += float(wml.detach())
                 tot_sum += float(loss.detach()); n_batches += 1
                 if self.meter is not None and self.meter._cur is not None:
                     self.meter.record_batch(len(x))
-        # fallback: no task batches this round -> embed the sign string alone
+        # fallback: no task batches this round -> embed the sign string alone. The sign-loss
+        # only reads the weights (no data, no forward pass): step until every bit clears the margin
         if not saw_task:
-            for _ in range(max(1, self.local_epochs)):
+            for _ in range(self._SIGN_ONLY_MAX_STEPS):
                 opt.zero_grad()
                 gammas = wfs.gather_gammas_params(self.model, carriers)
                 wml = lam * wfs.sign_embed_loss(gammas, Es, bits, margin)
+                wm_sum += float(wml.detach()); tot_sum += float(wml.detach()); n_batches += 1
+                if float(wml.detach()) <= 0.0:
+                    break
                 wml.backward()
                 if torch.isfinite(wml):
+                    self._mask_grads()
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                     opt.step()
-                wm_sum += float(wml.detach()); tot_sum += float(wml.detach()); n_batches += 1
         # log per-round losses + the current white-box sign BER 
         with torch.no_grad():
             cur_ber = wfs.sign_ber(
@@ -437,6 +454,13 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
     fr_idx = resolve_free_riders(cfg, len(client_loaders), seed)   # honours cfg.free_rider_ids
     if attack in (None, "none", ""):
         fr_idx = set()
+    # tap_scope="wm" (train only the mark's carrier weights) exists for the white-box sign
+    # mark + the graftblock free-rider only
+    if (str(getattr(cfg, "tap_scope", "")) == "wm"
+            and attack in ("graftblock", "adaptive_tap", "submarine", "autopilot")
+            and (attack != "graftblock" or scheme != "fedipr_sign")):
+        raise ValueError("tap_scope='wm' needs attack='graftblock' and wm_scheme='fedipr_sign' "
+                         f"(got attack='{attack}', wm_scheme='{scheme}').")
 
     # optional trigger-class overrides: "0:6,1:6" -> {0: 6, 1: 6} FR and honest on same trigger class
     tmap = {}
@@ -487,26 +511,29 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
 
     # ---- FedIPR SIGN (white-box): carrier LAYER(S) + per-client secrets --
     sign_sets = {}
-    sign_carrier_names = None
+    sign_carrier_names = sign_carriers_dev = None
     if scheme == "fedipr_sign":
         # server config for num/which
         # 1 => output-layer only (fragile); >1 spreads into the body (beats the head2 free-rider); "all_bn" => full depth.
+        # carrier="scatter": no layer -- fedipr_sign_scatter_n scalar weights spread over every tensor.
         sign_carrier_names = wfs.resolve_carrier_names(
             model, str(getattr(cfg, "fedipr_sign_carrier", "auto_last_bn")),
-            int(getattr(cfg, "fedipr_sign_layers", 1)))
+            int(getattr(cfg, "fedipr_sign_layers", 1)),
+            scatter_n=int(getattr(cfg, "fedipr_sign_scatter_n", 512)), seed=seed)
+        sign_carriers_dev = wfs.carriers_to(sign_carrier_names, device)   # clients' copy
         channels = wfs.per_carrier_channels(model, sign_carrier_names)
         bits_list = wfs.plan_bits(channels, int(getattr(cfg, "fedipr_sign_bits", 40)),
                                   len(client_loaders))
         sign_sets = wfs.build_client_signsets(range(len(client_loaders)),
                                               channels, bits_list, seed)
         registry.scheme = "fedipr_sign"
-        registry.sign_carrier = sign_carrier_names            # list of names 
+        registry.sign_carrier = wfs.describe_carriers(sign_carrier_names)   # list of names
         registry.sign_bits_per_layer = list(bits_list)
         registry.sign_total_bits = int(sum(bits_list))
         import warnings
         warnings.warn(f"[fedipr_sign] carriers={len(sign_carrier_names)} "
                       f"bits/layer={bits_list} (total {sum(bits_list)}) "
-                      f"names={sign_carrier_names}")
+                      f"names={registry.sign_carrier}")
 
     clients, unembed = [], []
     # build each client with its trigger class, key, and target bits
@@ -532,7 +559,7 @@ def build_watermarked_clients(cfg, client_loaders, model, device, seed,
             registry.trigger_holdings[cid] = int(sum(len(b) for b in ss["bits"]))  # total sign bits
             registry.shard_sizes[cid] = int(sum(_counts[cid])) if cid < len(_counts) else None
             fedipr_kw = dict(wm_scheme="fedipr_sign", sign_E=ss["E"], sign_bits=ss["bits"],
-                             sign_carrier=sign_carrier_names,
+                             sign_carrier=sign_carriers_dev,
                              sign_lambda=float(getattr(cfg, "fedipr_sign_lambda", 1.0)),
                              sign_margin=float(getattr(cfg, "fedipr_sign_margin", 0.1)))
         else:
@@ -1326,6 +1353,7 @@ def make_adaptive_tap_attack(base_cls):
 #  Head-Only Attack (group L):  -- our attack                       
 #  honest warmup, then every free-ride round: train only the last layers on a reduced shard (cpc)
 #    scope  <- tap_scope   ("head2" = softmax fc + the conv layer before it) (head = softmax fc)
+#                          ("wm" = only the sign mark's own carrier weights, fedipr_sign)
 #    cpc    <- autop_common_per_class ; warmup <- autop_honest_until/_calib_rounds
 # ------------------------------------------------------------------------------ #
 def make_graftblock_attack(base_cls):
@@ -1340,6 +1368,9 @@ def make_graftblock_attack(base_cls):
         #   "head"  = the SOFTMAX/OUTPUT layer (fc) 
         _SCOPE_KEEP = {"full": None, "block2": 20, "block": 8, "head2": 5, "head": 2}
         # note: other scopes dropped - only using head
+        #   "wm" (fedipr_sign only) = exactly the mark's carrier weights, wherever they sit:
+        #          the carrier scale tensor(s), or the single scattered scalars (carrier="scatter").
+        #          Everything else is submitted unchanged from the global model.
 
         def __init__(self, *a, common_per_class: int = 5, honest_rounds: int = 12,
                      calib_rounds: int = 4, scope: str = "head2", graft: bool = False,
@@ -1358,6 +1389,12 @@ def make_graftblock_attack(base_cls):
 
         # scope freeze/restore ----------
         def _freeze_scope(self):
+            if self.scope == "wm":
+                # only the carrier weights move: freeze the other tensors, mask the rest (_mask_grads)
+                self._wm_masks = wfs.carrier_masks(self.model, self._sign_carriers)
+                for n, p in self.model.named_parameters():
+                    p.requires_grad_(n in self._wm_masks)
+                return
             keep = self._SCOPE_KEEP.get(self.scope)
             named = list(self.model.named_parameters())
             if keep is None:
@@ -1369,10 +1406,13 @@ def make_graftblock_attack(base_cls):
                 p.requires_grad_(i >= cut)
 
         def _restore_scope(self):
+            self._wm_masks = None
             for p in self.model.parameters():
                 p.requires_grad_(True)
 
         def _scope_keys(self):
+            if self.scope == "wm":
+                return list(wfs.carrier_masks(self.model, self._sign_carriers))
             keep = self._SCOPE_KEEP.get(self.scope) or 2
             named = list(self.model.named_parameters())
             return [name for name, _ in named[len(named) - int(keep):]]
@@ -1399,6 +1439,10 @@ def make_graftblock_attack(base_cls):
             self._freeze_scope()                       # only the last layers move
             try:
                 submit, n = super().produce_update(global_state, prev_global_state, round_idx)
+                if self.scope == "wm":
+                    # weight decay still shrinks the other entries of a carrier tensor: pin them to the global
+                    for k, m in (self._wm_masks or {}).items():
+                        submit[k] = torch.where(m.cpu(), submit[k], global_state[k])
             finally:
                 self._restore_scope()
                 self.loader = self._orig_loader

@@ -48,7 +48,8 @@ class ExpConfig:
     tap_period: int = 1              # period P for tap_when="every_k"
     tap_max_coast: int = 999         # force a tap after this many consecutive coasts (safety cap)
     tap_data_cpc: int = 5            # amount of data per tap: images/common-class (-1 full shard, 0 trigger-only, N=+N)
-    tap_scope: str = "full"          # model scope a tap trains: "full" | "block2" (last 20 tensors) 
+    tap_scope: str = "full"          # model scope a tap trains: "full" | "block2" (last 20 tensors)
+                                     # | "wm" (graftblock + fedipr_sign: only the mark's carrier weights)
     tap_coast_mode: str = "decay"    # how the FR free-rides between taps: "decay" = resend its own last tapped
     tap_graft_decay: float = 0.0     # graft coast: blend frozen mark-head toward global head each coast (0=off, tail-spike fix)
     tap_probe_holdout: int = 16      # held-out trigger images for the FR's self-BER probe (generalisation)
@@ -84,7 +85,10 @@ class ExpConfig:
     fedipr_sign_carrier: str = "auto_last_bn"  # which layers: "auto_last_bn" = the last
                                             #    fedipr_sign_layers normalization scales (output->body);
                                             #    "all_bn" = every normalization scale (full depth);
-                                            #    "a,b,c" = an explicit list of param names (forced).
+                                            #    "a,b,c" = an explicit list of param names (forced);
+                                            #    "scatter" = no layer: fedipr_sign_scatter_n scalar weights
+                                            #    at random positions in every parameter tensor (one carrier).
+    fedipr_sign_scatter_n: int = 512        # carrier="scatter": number of scattered scalar weights
     wm_bits: int = 0                        # m; 0 -> auto
     wm_balanced_keys: bool = False          # False = random +/-1 keys. True = sign-balanced rows 
     wm_trigger_assign: str = "roundrobin"   # trigger-class -> client assignment policy:

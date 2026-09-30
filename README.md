@@ -39,7 +39,7 @@ The **adaptive "submarine"** free-rider (`adaptive_tap`) still exists and is doc
 | `scripts/to_pgfplots.py` | paper figures + table -> pgfplots `.dat` / `.tex` (Overleaf); `--appendix` for the appendix set |
 | `scripts/paper_figs_mpl.py` | the same paper / appendix figures rendered with matplotlib (PNG) |
 | `scripts/plots.py` | legacy per-family diagnostic plots (`./runbook.sh plot-legacy`) |
-| `infra/run_now.sh` | builds `jobs.tsv` for groups `A T D E EA H K Y Z L F G FD HS` |
+| `infra/run_now.sh` | builds `jobs.tsv` for groups `A T D E EA H K Y Z L F G GS FD HS` |
 | `infra/runbook.sh` | phase driver: manifest -> submit -> plot (paper / appendix / Food-101) |
 | `infra/submit_experiment.sh` | one RunAI/Kubernetes job submission (or one manifest row with `DRYRUN=1`) |
 | `infra/submit_pool.sh` | runs the `jobs.tsv` queue over `PODS × WORKERS` |
@@ -83,10 +83,13 @@ Food-101/ResNet-50 (appendix, Table II): 0.280 / 0.263 (FareMark head), 0.272 / 
 `Y` oracle-η submarine ablation (J4) · `FD` Food-101 / ResNet-50 basics (config 15, 1 seed) ·
 `F` FedIPR **backdoor** mirror of A/H/L (implemented, not in the current figures).
 
+**Exploratory (not in the draft):**
+`GS` FedIPR sign with a **scattered carrier** (`FEDIPR_SIGN_CARRIER=scatter`): the mark sits in 512 scalar weights at random positions in every parameter tensor instead of a layer. Active row (1 seed): `GS_Lwm`, the `TAP_SCOPE=wm` FR that trains only those marked weights on the reduced shard, i.e. `G_L1_graftblock_head2_c36_ws` with the mark scattered. Commented out: honest floor, fixed `head2` FR, and the no-data variant `GS_Lwm0`.
+
 `HS` also builds `G_Lfull_c36_ws_L{1,6,20}` (item e): the adaptive sign free-rider on the full shard, which is draft Fig. 6's purple "full-data cost" line. `BATCH=HS` therefore reproduces all of Fig. 6 (`SEEDS_HS="0 1 2"` for 3 seeds).
 
 Family-tag decoder: `c100` = CIFAR-100; `c36`/`c17` = free-rider **client ids** 3,6 / 1,7 (**not** a dataset);
-`aXX` = Dirichlet α; `rep<seed>` = seed; `_fi` = FedIPR backdoor; `_ws` = FedIPR sign white-box; `_L<N>` = number of sign carrier layers.
+`aXX` = Dirichlet α; `rep<seed>` = seed; `_fi` = FedIPR backdoor; `_ws` = FedIPR sign white-box; `_L<N>` = number of sign carrier layers; `_s<N>` = N scattered sign carrier weights (group GS).
 Food-101 runs reuse the CIFAR-100 family names (`…_c100…`) inside their own results folder.
 
 ---
